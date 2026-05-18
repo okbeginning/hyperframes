@@ -87,7 +87,7 @@ function splitInlineStyleDeclarations(style: string): string[] {
 }
 
 export interface PatchOperation {
-  type: "inline-style" | "attribute" | "text-content";
+  type: "inline-style" | "attribute" | "text-content" | "html-attribute";
   property: string;
   value: string | null;
 }
@@ -413,6 +413,91 @@ function findMatchingClosingTagIndex(html: string, tagName: string, contentStart
   return -1;
 }
 
+const HTML_BOOLEAN_ATTRIBUTES = new Set([
+  "loop",
+  "muted",
+  "autoplay",
+  "playsinline",
+  "controls",
+  "default",
+  "defer",
+  "disabled",
+  "hidden",
+  "nomodule",
+  "open",
+  "readonly",
+  "required",
+  "reversed",
+  "selected",
+]);
+
+function patchHtmlAttributeInTag(
+  html: string,
+  tag: string,
+  attr: string,
+  value: string | null,
+): string {
+  if (!tag) return html;
+
+  const isBoolean = HTML_BOOLEAN_ATTRIBUTES.has(attr);
+
+  if (isBoolean) {
+    const escapedAttr = escapeRegex(attr);
+    const hasBoolAttr = new RegExp(`(?:^|\\s)${escapedAttr}(?:\\s|=|$)`).test(tag);
+
+    if (value === null || value === "" || value === "false") {
+      if (!hasBoolAttr) return html;
+      const removePattern = new RegExp(`\\s+${escapedAttr}(?:=(["'])[^"']*\\1)?`);
+      const newTag = tag.replace(removePattern, "");
+      return html.replace(tag, newTag);
+    }
+    if (hasBoolAttr) return html;
+    const newTag = tag + ` ${attr}`;
+    return html.replace(tag, newTag);
+  }
+
+  const attrPattern = new RegExp(`\\b${escapeRegex(attr)}=(["'])([^"']*)\\1`);
+  if (value === null) {
+    if (!attrPattern.test(tag)) return html;
+    const removePattern = new RegExp(`\\s+${escapeRegex(attr)}=(["'])[^"']*\\1`);
+    const newTag = tag.replace(removePattern, "");
+    return html.replace(tag, newTag);
+  }
+
+  const escaped = escapeHtmlAttribute(value);
+  if (attrPattern.test(tag)) {
+    const newTag = tag.replace(attrPattern, `${attr}="${escaped}"`);
+    return html.replace(tag, newTag);
+  }
+
+  const newTag = tag + ` ${attr}="${escaped}"`;
+  return html.replace(tag, newTag);
+}
+
+function patchHtmlAttribute(
+  html: string,
+  elementId: string,
+  attr: string,
+  value: string | null,
+): string {
+  const idPattern = new RegExp(`(<[^>]*\\bid=(["'])${escapeRegex(elementId)}\\2[^>]*)>`, "i");
+  const match = idPattern.exec(html);
+  if (!match) return html;
+  return patchHtmlAttributeInTag(html, match[1], attr, value);
+}
+
+function patchHtmlAttributeByTarget(
+  html: string,
+  target: PatchTarget,
+  attr: string,
+  value: string | null,
+): string {
+  const match = findTagByTarget(html, target);
+  if (!match) return html;
+  const newTag = patchHtmlAttributeInTag(match.tag, match.tag, attr, value);
+  return replaceTagAtMatch(html, match, newTag);
+}
+
 function patchTextContentByTarget(html: string, target: PatchTarget, value: string): string {
   const match = findTagByTarget(html, target);
   if (!match) return html;
@@ -436,6 +521,8 @@ export function applyPatch(html: string, elementId: string, op: PatchOperation):
       return patchInlineStyle(html, elementId, op.property, op.value);
     case "attribute":
       return patchAttribute(html, elementId, op.property, op.value);
+    case "html-attribute":
+      return patchHtmlAttribute(html, elementId, op.property, op.value);
     case "text-content":
       return op.value !== null ? patchTextContent(html, elementId, op.value) : html;
     default:
@@ -456,6 +543,8 @@ export function applyPatchByTarget(html: string, target: PatchTarget, op: PatchO
       return patchInlineStyleByTarget(html, target, op.property, op.value);
     case "attribute":
       return patchAttributeByTarget(html, target, op.property, op.value);
+    case "html-attribute":
+      return patchHtmlAttributeByTarget(html, target, op.property, op.value);
     case "text-content":
       return op.value !== null ? patchTextContentByTarget(html, target, op.value) : html;
     default:

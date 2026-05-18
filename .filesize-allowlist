@@ -3,3 +3,4 @@ packages/studio/src/hooks/useManifestPersistence.ts
 packages/studio/src/player/components/PlayerControls.tsx
 packages/studio/src/components/editor/manualEdits.test.ts
 packages/studio/src/components/editor/manualEditsDom.ts
+packages/studio/src/utils/sourcePatcher.ts

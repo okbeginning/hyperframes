@@ -12,8 +12,7 @@ import {
 
 /** Motion data without targeting metadata. */
 type StudioMotionData = Omit<StudioGsapMotion, "kind" | "target" | "updatedAt">;
-import { useCallback } from "react";
-import { resolveDomEditSelection, type DomEditLayerItem } from "./editor/domEditing";
+
 import { useStudioContext } from "../contexts/StudioContext";
 import { usePanelLayoutContext } from "../contexts/PanelLayoutContext";
 import { useFileManagerContext } from "../contexts/FileManagerContext";
@@ -56,6 +55,7 @@ export function StudioRightPanel({
     clearDomSelection,
     handleDomStyleCommit,
     handleDomAttributeCommit,
+    handleDomHtmlAttributeCommit,
     handleDomPathOffsetCommit,
     handleDomBoxSizeCommit,
     handleDomRotationCommit,
@@ -66,23 +66,10 @@ export function StudioRightPanel({
     handleAskAgent,
     handleDomMotionCommit,
     handleDomMotionClear,
-    applyDomSelection,
   } = useDomEditContext();
 
-  const { assets, fontAssets, handleImportFiles, handleImportFonts } = useFileManagerContext();
-
-  const isMasterView = !activeCompPath || activeCompPath === "index.html";
-  const handleSelectLayer = useCallback(
-    (layer: DomEditLayerItem) => {
-      const selection = resolveDomEditSelection(layer.element, {
-        activeCompositionPath: activeCompPath,
-        isMasterView,
-        preferClipAncestor: false,
-      });
-      if (selection) applyDomSelection(selection);
-    },
-    [activeCompPath, isMasterView, applyDomSelection],
-  );
+  const { assets, fontAssets, projectDir, handleImportFiles, handleImportFonts } =
+    useFileManagerContext();
 
   const renderJobs = renderQueue.jobs as RenderJob[];
 
@@ -163,6 +150,7 @@ export function StudioRightPanel({
               ) : designPanelActive ? (
                 <PropertyPanel
                   projectId={projectId}
+                  projectDir={projectDir}
                   assets={assets}
                   element={domEditGroupSelections.length > 1 ? null : domEditSelection}
                   multiSelectCount={domEditGroupSelections.length}
@@ -170,6 +158,7 @@ export function StudioRightPanel({
                   onClearSelection={clearDomSelection}
                   onSetStyle={handleDomStyleCommit}
                   onSetAttribute={handleDomAttributeCommit}
+                  onSetHtmlAttribute={handleDomHtmlAttributeCommit}
                   onSetManualOffset={handleDomPathOffsetCommit}
                   onSetManualSize={handleDomBoxSizeCommit}
                   onSetManualRotation={handleDomRotationCommit}
@@ -181,8 +170,6 @@ export function StudioRightPanel({
                   onImportAssets={handleImportFiles}
                   fontAssets={fontAssets}
                   onImportFonts={handleImportFonts}
-                  activeCompositionPath={activeCompPath}
-                  onSelectLayer={handleSelectLayer}
                 />
               ) : motionPanelActive ? (
                 <MotionPanel

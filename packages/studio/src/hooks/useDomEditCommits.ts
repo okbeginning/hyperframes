@@ -190,6 +190,7 @@ export function useDomEditCommits({
   const {
     handleDomStyleCommit,
     handleDomAttributeCommit,
+    handleDomHtmlAttributeCommit,
     handleDomTextCommit,
     commitDomTextFields,
     handleDomTextFieldStyleCommit,
@@ -439,6 +440,7 @@ export function useDomEditCommits({
     resolveImportedFontAsset,
     handleDomStyleCommit,
     handleDomAttributeCommit,
+    handleDomHtmlAttributeCommit,
     handleDomTextCommit,
     commitDomTextFields,
     handleDomTextFieldStyleCommit,

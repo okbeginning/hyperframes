@@ -42,6 +42,8 @@ export const CURATED_STYLE_PROPERTIES = [
   "backdrop-filter",
   "z-index",
   "transform",
+  "object-fit",
+  "object-position",
 ] as const;
 
 export interface DomEditCapabilities {

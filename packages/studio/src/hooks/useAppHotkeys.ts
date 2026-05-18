@@ -57,7 +57,6 @@ export function useAppHotkeys({
   handleTimelineElementDelete,
   handleDomEditElementDelete,
   domEditSelectionRef,
-  clearDomSelectionRef,
   editHistory,
   readOptionalProjectFile,
   readProjectFile,
@@ -116,12 +115,10 @@ export function useAppHotkeys({
       return;
     }
     if (result.ok && result.label) {
-      clearDomSelectionRef.current();
       await syncHistoryPreviewAfterApply(result.paths);
       showToast(`Undid ${result.label}`, "info");
     }
   }, [
-    clearDomSelectionRef,
     editHistory,
     readHistoryProjectFile,
     showToast,
@@ -141,12 +138,10 @@ export function useAppHotkeys({
       return;
     }
     if (result.ok && result.label) {
-      clearDomSelectionRef.current();
       await syncHistoryPreviewAfterApply(result.paths);
       showToast(`Redid ${result.label}`, "info");
     }
   }, [
-    clearDomSelectionRef,
     editHistory,
     readHistoryProjectFile,
     showToast,

@@ -1,6 +1,6 @@
 // Vite adapter that wires the shared Studio API to the local filesystem and build tools.
 
-import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, writeFileSync, realpathSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import type { ViteDevServer } from "vite";
 import {
@@ -132,7 +132,11 @@ export function createViteAdapter(dataDir: string, server: ViteDevServer): Studi
             if (session.projectId) {
               projectDir = join(dataDir, session.projectId);
               if (existsSync(projectDir)) {
-                return { id: session.projectId, dir: projectDir, title: session.title };
+                return {
+                  id: session.projectId,
+                  dir: realpathSync(projectDir),
+                  title: session.title,
+                };
               }
             }
           } catch {
@@ -141,7 +145,7 @@ export function createViteAdapter(dataDir: string, server: ViteDevServer): Studi
         }
         return null;
       }
-      return { id, dir: projectDir };
+      return { id, dir: realpathSync(projectDir) };
     },
 
     async bundle(dir: string) {

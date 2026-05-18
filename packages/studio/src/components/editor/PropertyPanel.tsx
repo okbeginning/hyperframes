@@ -1,11 +1,6 @@
 import { memo } from "react";
 import { Clock, Eye, Layers, MessageSquare, Move, X } from "../../icons/SystemIcons";
-import {
-  collectDomEditLayerItems,
-  getDomEditLayerKey,
-  type DomEditSelection,
-  type DomEditLayerItem,
-} from "./domEditing";
+import { type DomEditSelection } from "./domEditing";
 import { readStudioBoxSize, readStudioPathOffset, readStudioRotation } from "./manualEdits";
 import type { ImportedFontAsset } from "./fontAssets";
 import {
@@ -16,6 +11,7 @@ import {
   RESPONSIVE_GRID,
 } from "./propertyPanelHelpers";
 import { MetricField, Section } from "./propertyPanelPrimitives";
+import { isMediaElement, MediaSection } from "./propertyPanelMediaSection";
 import { TextSection, StyleSections } from "./propertyPanelSections";
 
 // Re-export helpers that external consumers import from this module
@@ -33,6 +29,7 @@ export {
 
 interface PropertyPanelProps {
   projectId: string;
+  projectDir: string | null;
   assets: string[];
   element: DomEditSelection | null;
   multiSelectCount?: number;
@@ -40,6 +37,7 @@ interface PropertyPanelProps {
   onClearSelection: () => void;
   onSetStyle: (prop: string, value: string) => void | Promise<void>;
   onSetAttribute: (attr: string, value: string) => void | Promise<void>;
+  onSetHtmlAttribute: (attr: string, value: string | null) => void | Promise<void>;
   onSetManualOffset: (element: DomEditSelection, next: { x: number; y: number }) => void;
   onSetManualSize: (element: DomEditSelection, next: { width: number; height: number }) => void;
   onSetManualRotation: (element: DomEditSelection, next: { angle: number }) => void;
@@ -51,68 +49,6 @@ interface PropertyPanelProps {
   onImportAssets?: (files: FileList) => Promise<string[]>;
   fontAssets?: ImportedFontAsset[];
   onImportFonts?: (files: FileList | File[]) => Promise<ImportedFontAsset[]>;
-  activeCompositionPath?: string | null;
-  onSelectLayer?: (layer: DomEditLayerItem) => void;
-}
-
-/* ------------------------------------------------------------------ */
-/*  LayerTree                                                          */
-/* ------------------------------------------------------------------ */
-
-function LayerTree({
-  element,
-  activeCompositionPath,
-  onSelectLayer,
-}: {
-  element: DomEditSelection | null;
-  activeCompositionPath: string | null;
-  onSelectLayer: (layer: DomEditLayerItem) => void;
-}) {
-  const isMasterView = !activeCompositionPath || activeCompositionPath === "index.html";
-  const layers = collectDomEditLayerItems(element?.element, {
-    activeCompositionPath,
-    isMasterView,
-  });
-  if (layers.length <= 1) return null;
-
-  const selectedKey = element ? getDomEditLayerKey(element) : null;
-
-  return (
-    <Section title="Layers" icon={<Layers size={15} />}>
-      <div className="space-y-0.5">
-        {layers.map((layer) => {
-          const selected = layer.key === selectedKey;
-          return (
-            <button
-              key={layer.key}
-              type="button"
-              onClick={() => onSelectLayer(layer)}
-              className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-                selected
-                  ? "bg-studio-accent/14 text-studio-accent"
-                  : "text-neutral-300 hover:bg-white/[0.04] hover:text-neutral-100"
-              }`}
-              style={{ paddingLeft: 8 + layer.depth * 12 }}
-            >
-              <span
-                className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[9px] font-bold uppercase ${
-                  selected
-                    ? "bg-studio-accent/18 text-studio-accent"
-                    : "bg-neutral-800 text-neutral-500"
-                }`}
-              >
-                {layer.tagName.slice(0, 2)}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs">{layer.label}</span>
-              {layer.childCount > 0 && (
-                <span className="text-[9px] tabular-nums text-neutral-500">{layer.childCount}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </Section>
-  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,6 +118,7 @@ function TimingSection({
 
 export const PropertyPanel = memo(function PropertyPanel({
   projectId,
+  projectDir,
   assets,
   element,
   multiSelectCount = 0,
@@ -189,6 +126,7 @@ export const PropertyPanel = memo(function PropertyPanel({
   onClearSelection,
   onSetStyle,
   onSetAttribute,
+  onSetHtmlAttribute,
   onSetManualOffset,
   onSetManualSize,
   onSetManualRotation,
@@ -200,8 +138,6 @@ export const PropertyPanel = memo(function PropertyPanel({
   onImportAssets,
   fontAssets = [],
   onImportFonts,
-  activeCompositionPath = null,
-  onSelectLayer,
 }: PropertyPanelProps) {
   const styles = element?.computedStyles ?? EMPTY_STYLES;
 
@@ -331,11 +267,18 @@ export const PropertyPanel = memo(function PropertyPanel({
           onRemoveTextField={onRemoveTextField}
         />
 
-        {onSelectLayer && (
-          <LayerTree
+        {element.dataAttributes.start != null && (
+          <TimingSection element={element} onSetAttribute={onSetAttribute} />
+        )}
+
+        {isMediaElement(element) && (
+          <MediaSection
+            projectDir={projectDir}
             element={element}
-            activeCompositionPath={activeCompositionPath}
-            onSelectLayer={onSelectLayer}
+            styles={styles}
+            onSetStyle={onSetStyle}
+            onSetAttribute={onSetAttribute}
+            onSetHtmlAttribute={onSetHtmlAttribute}
           />
         )}
 
@@ -384,10 +327,6 @@ export const PropertyPanel = memo(function PropertyPanel({
             />
           </div>
         </Section>
-
-        {element.dataAttributes.start != null && (
-          <TimingSection element={element} onSetAttribute={onSetAttribute} />
-        )}
 
         {showEditableSections && (
           <StyleSections
