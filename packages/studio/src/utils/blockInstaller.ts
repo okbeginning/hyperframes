@@ -14,6 +14,7 @@ interface AddBlockOptions {
   blockName: string;
   activeCompPath: string | null;
   placement?: { start: number; track: number };
+  visualPosition?: { left: number; top: number };
   timelineElements: TimelineElement[];
   readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string) => Promise<void>;
@@ -44,6 +45,7 @@ export async function addBlockToProject(
     blockName,
     activeCompPath,
     placement,
+    visualPosition,
     timelineElements,
     readProjectFile,
     writeProjectFile,
@@ -133,6 +135,9 @@ export async function addBlockToProject(
         ? (block as { dimensions: { height: number } }).dimensions.height
         : hostDims.height;
 
+      const left = visualPosition ? Math.round(visualPosition.left) : 0;
+      const top = visualPosition ? Math.round(visualPosition.top) : 0;
+
       const subCompHtml =
         `<div data-composition-id="${compId}" ` +
         `data-composition-src="${compositionFile}" ` +
@@ -140,7 +145,7 @@ export async function addBlockToProject(
         `data-duration="${formatTimelineAttributeNumber(duration)}" ` +
         `data-track-index="${track}" ` +
         `data-width="${width}" data-height="${height}" ` +
-        `style="position: absolute; left: 0px; top: 0px; width: ${width}px; height: ${height}px; z-index: ${zIndex}">` +
+        `style="position: absolute; left: ${left}px; top: ${top}px; width: ${width}px; height: ${height}px; z-index: ${zIndex}">` +
         `</div>`;
 
       const patchedContent = insertTimelineAssetIntoSource(originalContent, subCompHtml);

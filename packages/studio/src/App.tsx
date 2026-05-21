@@ -255,6 +255,36 @@ export function StudioApp() {
     ],
   );
 
+  const handlePreviewBlockDrop = useCallback(
+    (blockName: string, position: { left: number; top: number }) => {
+      if (!projectId) return;
+      void addBlockToProject({
+        projectId,
+        blockName,
+        activeCompPath,
+        visualPosition: position,
+        timelineElements,
+        readProjectFile: fileManager.readProjectFile,
+        writeProjectFile: fileManager.writeProjectFile,
+        recordEdit: editHistory.recordEdit,
+        refreshFileTree: fileManager.refreshFileTree,
+        reloadPreview,
+        showToast,
+      });
+    },
+    [
+      projectId,
+      activeCompPath,
+      timelineElements,
+      fileManager.readProjectFile,
+      fileManager.writeProjectFile,
+      fileManager.refreshFileTree,
+      editHistory.recordEdit,
+      reloadPreview,
+      showToast,
+    ],
+  );
+
   const clearDomSelectionRef = useRef<() => void>(() => {});
   const domEditSelectionBridgeRef = useRef<DomEditSelection | null>(null);
   const handleDomEditElementDeleteRef = useRef<(s: DomEditSelection) => Promise<void>>(
@@ -541,6 +571,7 @@ export function StudioApp() {
                   handleTimelineElementDelete={timelineEditing.handleTimelineElementDelete}
                   handleTimelineAssetDrop={timelineEditing.handleTimelineAssetDrop}
                   handleTimelineBlockDrop={handleTimelineBlockDrop}
+                  handlePreviewBlockDrop={handlePreviewBlockDrop}
                   handleTimelineFileDrop={timelineEditing.handleTimelineFileDrop}
                   handleTimelineElementMove={timelineEditing.handleTimelineElementMove}
                   handleTimelineElementResize={timelineEditing.handleTimelineElementResize}

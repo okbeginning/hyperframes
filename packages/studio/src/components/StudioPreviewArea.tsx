@@ -29,6 +29,10 @@ export interface StudioPreviewAreaProps {
     blockName: string,
     placement: Pick<TimelineElement, "start" | "track">,
   ) => Promise<void> | void;
+  handlePreviewBlockDrop?: (
+    blockName: string,
+    position: { left: number; top: number },
+  ) => Promise<void> | void;
   handleTimelineFileDrop: (
     files: File[],
     placement?: Pick<TimelineElement, "start" | "track">,
@@ -53,6 +57,7 @@ export function StudioPreviewArea({
   handleTimelineElementDelete,
   handleTimelineAssetDrop,
   handleTimelineBlockDrop,
+  handlePreviewBlockDrop,
   handleTimelineFileDrop,
   handleTimelineElementMove,
   handleTimelineElementResize,
@@ -104,6 +109,7 @@ export function StudioPreviewArea({
         onDeleteElement={handleTimelineElementDelete}
         onAssetDrop={handleTimelineAssetDrop}
         onBlockDrop={handleTimelineBlockDrop}
+        onPreviewBlockDrop={handlePreviewBlockDrop}
         onFileDrop={handleTimelineFileDrop}
         onMoveElement={handleTimelineElementMove}
         onResizeElement={handleTimelineElementResize}

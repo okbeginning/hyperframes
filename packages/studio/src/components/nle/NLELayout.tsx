@@ -54,6 +54,10 @@ interface NLELayoutProps {
     blockName: string,
     placement: Pick<TimelineElement, "start" | "track">,
   ) => Promise<void> | void;
+  onPreviewBlockDrop?: (
+    blockName: string,
+    position: { left: number; top: number },
+  ) => Promise<void> | void;
   /** Persist timeline move actions back into source HTML */
   onMoveElement?: (
     element: TimelineElement,
@@ -107,6 +111,7 @@ export const NLELayout = memo(function NLELayout({
   onDeleteElement,
   onAssetDrop,
   onBlockDrop,
+  onPreviewBlockDrop,
   onMoveElement,
   onResizeElement,
   onBlockedEditAttempt,
@@ -353,6 +358,7 @@ export const NLELayout = memo(function NLELayout({
             portrait={portrait}
             directUrl={directUrl}
             suppressLoadingOverlay={hasLoadedOnceRef.current}
+            onBlockDrop={onPreviewBlockDrop}
           />
           {!isFullscreen && previewOverlay}
         </div>

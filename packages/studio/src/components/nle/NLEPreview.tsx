@@ -12,6 +12,7 @@ import {
   type PreviewZoomState,
 } from "./previewZoom";
 import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/studioUiPreferences";
+import { usePreviewBlockDrop } from "./usePreviewBlockDrop";
 
 interface NLEPreviewProps {
   projectId: string;
@@ -21,6 +22,7 @@ interface NLEPreviewProps {
   portrait?: boolean;
   directUrl?: string;
   suppressLoadingOverlay?: boolean;
+  onBlockDrop?: (blockName: string, position: { left: number; top: number }) => void;
 }
 
 export function getPreviewPlayerKey({
@@ -90,6 +92,7 @@ export const NLEPreview = memo(function NLEPreview({
   portrait,
   directUrl,
   suppressLoadingOverlay,
+  onBlockDrop,
 }: NLEPreviewProps) {
   const activeKey = getPreviewPlayerKey({ projectId, directUrl });
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -364,6 +367,13 @@ export const NLEPreview = memo(function NLEPreview({
     };
   }, [applyPan]);
 
+  const {
+    isDragOver: previewDragOver,
+    handleDragOver: handlePreviewDragOver,
+    handleDragLeave: handlePreviewDragLeave,
+    handleDrop: handlePreviewDrop,
+  } = usePreviewBlockDrop({ portrait, stageRef, onBlockDrop });
+
   const initial = zoomRef.current;
 
   return (
@@ -373,6 +383,9 @@ export const NLEPreview = memo(function NLEPreview({
         className="relative flex-1 flex items-center justify-center p-2 overflow-hidden min-h-0 outline-none focus:ring-1 focus:ring-studio-accent/40 bg-neutral-700"
         tabIndex={0}
         aria-label="Composition preview"
+        onDragOver={handlePreviewDragOver}
+        onDragLeave={handlePreviewDragLeave}
+        onDrop={handlePreviewDrop}
       >
         <div className="absolute inset-2 flex items-center justify-center pointer-events-none">
           <div
@@ -402,6 +415,9 @@ export const NLEPreview = memo(function NLEPreview({
             />
           </div>
         </div>
+        {previewDragOver && (
+          <div className="absolute inset-2 z-40 rounded-lg border-2 border-dashed border-studio-accent/50 bg-studio-accent/[0.04] pointer-events-none" />
+        )}
         <div
           ref={hudRef}
           className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 rounded-lg px-4 py-2 text-sm font-mono tabular-nums text-white/90 bg-black/60 backdrop-blur-sm shadow-lg"
