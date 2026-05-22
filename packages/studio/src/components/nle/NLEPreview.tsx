@@ -391,6 +391,16 @@ export const NLEPreview = memo(function NLEPreview({
             }}
             data-testid="preview-zoom-stage"
           >
+            {directUrl?.includes("/components/") && (
+              <Player
+                key={`backdrop-${projectId}`}
+                projectId={projectId}
+                onLoad={() => {}}
+                portrait={portrait}
+                suppressLoadingOverlay
+                style={{ position: "absolute", inset: 0, zIndex: 0 }}
+              />
+            )}
             <Player
               key={activeKey}
               ref={iframeRef}
@@ -403,6 +413,11 @@ export const NLEPreview = memo(function NLEPreview({
               onCompositionLoadingChange={onCompositionLoadingChange}
               portrait={portrait}
               suppressLoadingOverlay={suppressLoadingOverlay}
+              style={
+                directUrl?.includes("/components/")
+                  ? { position: "absolute", inset: 0, zIndex: 1 }
+                  : undefined
+              }
             />
           </div>
         </div>

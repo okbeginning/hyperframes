@@ -4,6 +4,7 @@ import { formatFrameTime, frameToSeconds, stepFrameTime, formatTime } from "../l
 import { shouldMutePreviewAudio } from "../lib/timelineIframeHelpers";
 import { usePlayerStore, liveTime } from "../store/playerStore";
 import { trackStudioEvent } from "../../utils/studioTelemetry";
+import { Tooltip } from "../../components/ui";
 
 const SPEED_OPTIONS = [0.25, 0.5, 1, 1.5, 2] as const;
 const SEEK_EDGE_SNAP_PX = 8;
@@ -340,46 +341,51 @@ export const PlayerControls = memo(function PlayerControls({
       }}
     >
       {/* Play/Pause button */}
-      <button
-        type="button"
-        aria-label={isPlaying ? "Pause" : "Play"}
-        onClick={() => {
-          trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
-          onTogglePlay();
-        }}
-        disabled={controlsDisabled}
-        className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg disabled:opacity-30 disabled:pointer-events-none transition-colors"
-        style={{ background: "rgba(255,255,255,0.06)" }}
-      >
-        {isPlaying ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#FAFAFA" aria-hidden="true">
-            <rect x="6" y="4" width="4" height="16" rx="1" />
-            <rect x="14" y="4" width="4" height="16" rx="1" />
-          </svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#FAFAFA" aria-hidden="true">
-            <polygon points="6,3 20,12 6,21" />
-          </svg>
-        )}
-      </button>
+      <Tooltip label={isPlaying ? "Pause" : "Play"}>
+        <button
+          type="button"
+          aria-label={isPlaying ? "Pause" : "Play"}
+          onClick={() => {
+            trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
+            onTogglePlay();
+          }}
+          disabled={controlsDisabled}
+          className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          style={{ background: "rgba(255,255,255,0.06)" }}
+        >
+          {isPlaying ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="#FAFAFA" aria-hidden="true">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="#FAFAFA" aria-hidden="true">
+              <polygon points="6,3 20,12 6,21" />
+            </svg>
+          )}
+        </button>
+      </Tooltip>
 
       {/* Time display — click to toggle time/frame mode */}
-      <button
-        type="button"
-        onClick={() => setTimeDisplayMode((m) => (m === "time" ? "frame" : "time"))}
-        disabled={disabled}
-        title={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
-        className="font-mono text-[11px] tabular-nums flex-shrink-0 w-[118px] text-left transition-colors disabled:pointer-events-none hover:opacity-80"
-        style={{ color: "#A1A1AA", cursor: "pointer" }}
+      <Tooltip
+        label={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
       >
-        <span ref={timeDisplayRef}>{formatTime(0)}</span>
-        {timeDisplayMode === "time" ? (
-          <>
-            <span style={{ color: "#3F3F46", margin: "0 2px" }}>/</span>
-            <span style={{ color: "#52525B" }}>{formatTime(duration)}</span>
-          </>
-        ) : null}
-      </button>
+        <button
+          type="button"
+          onClick={() => setTimeDisplayMode((m) => (m === "time" ? "frame" : "time"))}
+          disabled={disabled}
+          className="font-mono text-[11px] tabular-nums flex-shrink-0 w-[118px] text-left transition-colors disabled:pointer-events-none hover:opacity-80"
+          style={{ color: "#A1A1AA", cursor: "pointer" }}
+        >
+          <span ref={timeDisplayRef}>{formatTime(0)}</span>
+          {timeDisplayMode === "time" ? (
+            <>
+              <span style={{ color: "#3F3F46", margin: "0 2px" }}>/</span>
+              <span style={{ color: "#52525B" }}>{formatTime(duration)}</span>
+            </>
+          ) : null}
+        </button>
+      </Tooltip>
 
       {/* Seek bar — teal progress fill */}
       <div
@@ -469,70 +475,73 @@ export const PlayerControls = memo(function PlayerControls({
       </div>
 
       {/* Mute toggle */}
-      <button
-        type="button"
-        onClick={() => {
-          if (!audioAutoMuted) {
-            trackStudioEvent("playback", { action: "mute_toggle", muted: !audioMuted });
-            setAudioMuted(!audioMuted);
-          }
-        }}
-        disabled={controlsDisabled || audioAutoMuted}
-        title={muteButtonLabel}
-        aria-label={muteButtonLabel}
-        aria-pressed={effectiveAudioMuted}
-        className={`h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-md border transition-colors disabled:pointer-events-none ${
-          effectiveAudioMuted
-            ? "text-studio-accent bg-studio-accent/10 border-studio-accent/30"
-            : "border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:bg-neutral-800"
-        } ${audioAutoMuted ? "opacity-70" : ""}`}
-      >
-        {effectiveAudioMuted ? (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M11 5 6 9H3v6h3l5 4V5Z" />
-            <path d="m19 9-6 6" />
-            <path d="m13 9 6 6" />
-          </svg>
-        ) : (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M11 5 6 9H3v6h3l5 4V5Z" />
-            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-            <path d="M18.5 5.5a9 9 0 0 1 0 13" />
-          </svg>
-        )}
-      </button>
+      <Tooltip label={muteButtonLabel}>
+        <button
+          type="button"
+          onClick={() => {
+            if (!audioAutoMuted) {
+              trackStudioEvent("playback", { action: "mute_toggle", muted: !audioMuted });
+              setAudioMuted(!audioMuted);
+            }
+          }}
+          disabled={controlsDisabled || audioAutoMuted}
+          aria-label={muteButtonLabel}
+          aria-pressed={effectiveAudioMuted}
+          className={`h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-md border transition-colors disabled:pointer-events-none ${
+            effectiveAudioMuted
+              ? "text-studio-accent bg-studio-accent/10 border-studio-accent/30"
+              : "border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:bg-neutral-800"
+          } ${audioAutoMuted ? "opacity-70" : ""}`}
+        >
+          {effectiveAudioMuted ? (
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+              <path d="m19 9-6 6" />
+              <path d="m13 9 6 6" />
+            </svg>
+          ) : (
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+              <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+              <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+            </svg>
+          )}
+        </button>
+      </Tooltip>
 
       {/* Speed control */}
       <div ref={speedMenuContainerRef} className="relative flex-shrink-0">
-        <button
-          type="button"
-          onClick={() => setShowSpeedMenu((v) => !v)}
-          disabled={disabled}
-          className="w-10 px-2 py-1 rounded-md text-[10px] font-mono tabular-nums transition-colors"
-          style={{ color: "#71717A", background: "rgba(255,255,255,0.04)" }}
-        >
-          {playbackRate === 1 ? "1x" : `${playbackRate}x`}
-        </button>
+        <Tooltip label="Playback speed">
+          <button
+            type="button"
+            onClick={() => setShowSpeedMenu((v) => !v)}
+            disabled={disabled}
+            className="w-10 px-2 py-1 rounded-md text-[10px] font-mono tabular-nums transition-colors"
+            style={{ color: "#71717A", background: "rgba(255,255,255,0.04)" }}
+          >
+            {playbackRate === 1 ? "1x" : `${playbackRate}x`}
+          </button>
+        </Tooltip>
         {showSpeedMenu && (
           <div
             className="absolute bottom-full right-0 mb-1.5 rounded-lg shadow-xl z-50 min-w-[56px] overflow-hidden"
@@ -566,122 +575,126 @@ export const PlayerControls = memo(function PlayerControls({
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => {
-          trackStudioEvent("playback", { action: "loop_toggle", enabled: !loopEnabled });
-          setLoopEnabled(!loopEnabled);
-        }}
-        disabled={disabled}
-        className={`h-7 w-7 flex items-center justify-center rounded-md border transition-colors ${
-          loopEnabled
-            ? "text-studio-accent bg-studio-accent/10 border-studio-accent/30"
-            : "border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:bg-neutral-800"
-        }`}
-        title="Loop playback"
-        aria-label={loopEnabled ? "Disable loop playback" : "Enable loop playback"}
-        aria-pressed={loopEnabled}
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M17 2l4 4-4 4" />
-          <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-          <path d="M7 22l-4-4 4-4" />
-          <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-        </svg>
-      </button>
-
-      {/* Fullscreen toggle */}
-      {onToggleFullscreen && (
+      <Tooltip label="Loop playback">
         <button
           type="button"
           onClick={() => {
-            trackStudioEvent("playback", { action: "fullscreen_toggle", active: !isFullscreen });
-            onToggleFullscreen();
+            trackStudioEvent("playback", { action: "loop_toggle", enabled: !loopEnabled });
+            setLoopEnabled(!loopEnabled);
           }}
-          className={`h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-md border transition-colors ${
-            isFullscreen
+          disabled={disabled}
+          className={`h-7 w-7 flex items-center justify-center rounded-md border transition-colors ${
+            loopEnabled
               ? "text-studio-accent bg-studio-accent/10 border-studio-accent/30"
               : "border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:bg-neutral-800"
           }`}
-          title={isFullscreen ? "Exit fullscreen (F)" : "Enter fullscreen (F)"}
-          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-        >
-          {isFullscreen ? (
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M8 3v3a2 2 0 0 1-2 2H3" />
-              <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
-              <path d="M3 16h3a2 2 0 0 1 2 2v3" />
-              <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
-            </svg>
-          ) : (
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M8 3H5a2 2 0 0 0-2 2v3" />
-              <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
-              <path d="M3 16v3a2 2 0 0 0 2 2h3" />
-              <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
-            </svg>
-          )}
-        </button>
-      )}
-
-      {/* Keyboard shortcuts + frame jump + work area — click to open panel */}
-      <div ref={shortcutsPanelRef} className="relative flex-shrink-0">
-        <button
-          type="button"
-          onClick={() => setShowShortcuts((v) => !v)}
-          className={`w-6 h-6 flex items-center justify-center rounded border transition-colors ${
-            showShortcuts
-              ? "border-neutral-600 text-neutral-200 bg-neutral-800"
-              : "border-neutral-800 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600"
-          }`}
-          aria-label="Shortcuts and tools"
-          aria-expanded={showShortcuts}
+          aria-label={loopEnabled ? "Disable loop playback" : "Enable loop playback"}
+          aria-pressed={loopEnabled}
         >
           <svg
-            width="11"
-            height="11"
+            width="13"
+            height="13"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="1.75"
+            strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+            <path d="M17 2l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+            <path d="M7 22l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
           </svg>
         </button>
+      </Tooltip>
+
+      {/* Fullscreen toggle */}
+      {onToggleFullscreen && (
+        <Tooltip label={isFullscreen ? "Exit fullscreen (F)" : "Enter fullscreen (F)"}>
+          <button
+            type="button"
+            onClick={() => {
+              trackStudioEvent("playback", { action: "fullscreen_toggle", active: !isFullscreen });
+              onToggleFullscreen();
+            }}
+            className={`h-7 w-7 flex-shrink-0 flex items-center justify-center rounded-md border transition-colors ${
+              isFullscreen
+                ? "text-studio-accent bg-studio-accent/10 border-studio-accent/30"
+                : "border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:bg-neutral-800"
+            }`}
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          >
+            {isFullscreen ? (
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+                <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+                <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+                <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+              </svg>
+            ) : (
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+                <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+                <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+                <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+              </svg>
+            )}
+          </button>
+        </Tooltip>
+      )}
+
+      {/* Keyboard shortcuts + frame jump + work area — click to open panel */}
+      <div ref={shortcutsPanelRef} className="relative flex-shrink-0">
+        <Tooltip label="Shortcuts and tools">
+          <button
+            type="button"
+            onClick={() => setShowShortcuts((v) => !v)}
+            className={`w-6 h-6 flex items-center justify-center rounded border transition-colors ${
+              showShortcuts
+                ? "border-neutral-600 text-neutral-200 bg-neutral-800"
+                : "border-neutral-800 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600"
+            }`}
+            aria-label="Shortcuts and tools"
+            aria-expanded={showShortcuts}
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+            </svg>
+          </button>
+        </Tooltip>
         {showShortcuts && (
           <div
             className="absolute bottom-full right-0 mb-2 z-50 rounded-lg shadow-xl min-w-[220px] overflow-y-auto"
@@ -709,13 +722,15 @@ export const PlayerControls = memo(function PlayerControls({
                   onKeyDown={handleJumpKeyDown}
                   onBlur={commitJumpFrame}
                 />
-                <button
-                  type="submit"
-                  disabled={disabled}
-                  className="h-6 px-2 rounded border border-neutral-700 text-[10px] text-neutral-300 transition-colors hover:border-neutral-500 hover:bg-neutral-800 disabled:opacity-40"
-                >
-                  Go
-                </button>
+                <Tooltip label="Jump to frame">
+                  <button
+                    type="submit"
+                    disabled={disabled}
+                    className="h-6 px-2 rounded border border-neutral-700 text-[10px] text-neutral-300 transition-colors hover:border-neutral-500 hover:bg-neutral-800 disabled:opacity-40"
+                  >
+                    Go
+                  </button>
+                </Tooltip>
               </form>
             </div>
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
@@ -741,23 +756,25 @@ export const PlayerControls = memo(function PlayerControls({
                         <span className="font-mono text-[10px] text-neutral-300">
                           {formatTime(inPoint)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setInPoint(null)}
-                          className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-200 transition-colors"
-                          aria-label="Clear in-point"
-                        >
-                          <svg
-                            width="8"
-                            height="8"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
+                        <Tooltip label="Clear in-point">
+                          <button
+                            type="button"
+                            onClick={() => setInPoint(null)}
+                            className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-200 transition-colors"
+                            aria-label="Clear in-point"
                           >
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
+                            <svg
+                              width="8"
+                              height="8"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                            >
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </Tooltip>
                       </>
                     ) : (
                       <span className="text-[10px] text-neutral-600">—</span>
@@ -780,23 +797,25 @@ export const PlayerControls = memo(function PlayerControls({
                         <span className="font-mono text-[10px] text-neutral-300">
                           {formatTime(outPoint)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setOutPoint(null)}
-                          className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-200 transition-colors"
-                          aria-label="Clear out-point"
-                        >
-                          <svg
-                            width="8"
-                            height="8"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
+                        <Tooltip label="Clear out-point">
+                          <button
+                            type="button"
+                            onClick={() => setOutPoint(null)}
+                            className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-200 transition-colors"
+                            aria-label="Clear out-point"
                           >
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
+                            <svg
+                              width="8"
+                              height="8"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                            >
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </Tooltip>
                       </>
                     ) : (
                       <span className="text-[10px] text-neutral-600">—</span>

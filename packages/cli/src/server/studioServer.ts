@@ -398,8 +398,38 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     async installRegistryBlock(opts) {
       const { resolveItem } = await import("../registry/resolver.js");
       const { installItem } = await import("../registry/installer.js");
+      const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
       const item = await resolveItem(opts.blockName);
       const { written } = await installItem(item, { destDir: opts.project.dir });
+
+      const indexPath = join(opts.project.dir, "index.html");
+      if (existsSync(indexPath)) {
+        const indexHtml = readFileSync(indexPath, "utf-8");
+        const hostW = indexHtml.match(/data-width="(\d+)"/)?.[1];
+        const hostH = indexHtml.match(/data-height="(\d+)"/)?.[1];
+        if (hostW && hostH) {
+          for (const absPath of written) {
+            if (!absPath.endsWith(".html")) continue;
+            let content = readFileSync(absPath, "utf-8");
+            content = content.replace(
+              /(<meta\s+name="viewport"\s+content="width=)\d+(,\s*height=)\d+/i,
+              `$1${hostW}$2${hostH}`,
+            );
+            content = content.replace(
+              /(\bwidth:\s*)\d+(px;\s*\n?\s*height:\s*)\d+(px;)/g,
+              (match, pre, mid, post) => {
+                if (match.includes("1920") || match.includes("1080")) {
+                  return `${pre}${hostW}${mid}${hostH}${post}`;
+                }
+                return match;
+              },
+            );
+            writeFileSync(absPath, content, "utf-8");
+          }
+        }
+      }
+
       const relativePaths = written.map((abs) => {
         const rel = abs.startsWith(opts.project.dir) ? abs.slice(opts.project.dir.length + 1) : abs;
         return rel;

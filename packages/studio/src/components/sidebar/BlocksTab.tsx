@@ -1,12 +1,14 @@
 import { memo, useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useBlockCatalog } from "../../hooks/useBlockCatalog";
 import {
   BLOCK_CATEGORIES,
   getCategoryColors,
   type BlockCategory,
 } from "../../utils/blockCategories";
-import { TIMELINE_BLOCK_MIME } from "../../utils/timelineAssetDrop";
-
+import { usePlayerStore } from "../../player";
+import { formatTime } from "../../player/lib/time";
+import { useStudioContext } from "../../contexts/StudioContext";
 export interface BlockPreviewInfo {
   videoUrl?: string;
   posterUrl?: string;
@@ -14,7 +16,7 @@ export interface BlockPreviewInfo {
 }
 
 interface BlocksTabProps {
-  onAddBlock: (blockName: string) => void;
+  onAddBlock?: (blockName: string) => void;
   onPreviewBlock?: (preview: BlockPreviewInfo | null) => void;
 }
 
@@ -22,6 +24,7 @@ interface BlocksTabProps {
 export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }: BlocksTabProps) {
   const { loading, error, search, setSearch, category, setCategory, filteredBlocks } =
     useBlockCatalog();
+  const [promptModal, setPromptModal] = useState<{ title: string; prompt: string } | null>(null);
 
   if (loading) {
     return (
@@ -62,7 +65,7 @@ export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }:
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search blocks…"
+            placeholder="Search by name, category, or tag…"
             className="w-full bg-neutral-900 border border-neutral-800 rounded-md pl-7 pr-2 py-1.5 text-[11px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-700 transition-colors"
           />
         </div>
@@ -104,29 +107,42 @@ export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }:
           >
             {filteredBlocks.map((block) => {
               const dur = "duration" in block ? (block.duration as number) : undefined;
-              const dims =
-                "dimensions" in block
-                  ? (block.dimensions as { width: number; height: number })
-                  : undefined;
               return (
                 <BlockCard
                   key={block.name}
                   name={block.name}
                   title={block.title}
+                  description={block.description}
+                  blockType={block.type}
                   duration={dur}
                   category={block.category}
                   tags={block.tags}
                   posterUrl={block.preview?.poster}
                   videoUrl={block.preview?.video}
-                  dimensions={dims}
-                  onAdd={() => onAddBlock(block.name)}
                   onPreview={onPreviewBlock}
+                  onShowPrompt={setPromptModal}
+                  onAdd={
+                    block.category === "vfx" ||
+                    block.category === "social" ||
+                    block.category === "scenes"
+                      ? () => onAddBlock?.(block.name)
+                      : undefined
+                  }
                 />
               );
             })}
           </div>
         )}
       </div>
+      {promptModal &&
+        createPortal(
+          <PromptPreviewModal
+            title={promptModal.title}
+            prompt={promptModal.prompt}
+            onClose={() => setPromptModal(null)}
+          />,
+          document.body,
+        )}
     </div>
   );
 });
@@ -160,27 +176,134 @@ function CategoryPill({
   );
 }
 
+interface CompositionContext {
+  currentTime: number;
+  activeCompPath: string | null;
+  elements: Array<{
+    id: string;
+    start: number;
+    duration: number;
+    track: number;
+    label?: string;
+    compositionSrc?: string;
+  }>;
+  compositionDimensions?: { width: number; height: number };
+}
+
+function formatCompositionContext(ctx: CompositionContext): string {
+  const lines: string[] = [
+    `Playback time: ${formatTime(ctx.currentTime)}`,
+    `Active composition: ${ctx.activeCompPath || "index.html"}`,
+  ];
+  if (ctx.compositionDimensions) {
+    lines.push(
+      `Dimensions: ${ctx.compositionDimensions.width}x${ctx.compositionDimensions.height}`,
+    );
+  }
+  const visibleNow = ctx.elements.filter(
+    (el) => ctx.currentTime >= el.start && ctx.currentTime < el.start + el.duration,
+  );
+  if (visibleNow.length > 0) {
+    lines.push(
+      "",
+      `Elements visible at ${formatTime(ctx.currentTime)}:`,
+      ...visibleNow.map(
+        (el) =>
+          `- ${el.label || el.id} (track ${el.track}, ${formatTime(el.start)}–${formatTime(el.start + el.duration)}${el.compositionSrc ? `, src: ${el.compositionSrc}` : ""})`,
+      ),
+    );
+  }
+  const maxZ = ctx.elements.length > 0 ? Math.max(...ctx.elements.map((_, i) => i + 1)) : 0;
+  lines.push("", `Highest track index: ${maxZ}`);
+  return lines.join("\n");
+}
+
+function buildAgentPrompt(
+  title: string,
+  name: string,
+  description: string,
+  category: BlockCategory,
+  blockType: string,
+  context: CompositionContext,
+): string {
+  const isComponent = blockType === "hyperframes:component";
+  const kind = isComponent ? "component" : "block";
+  const compositionInfo = formatCompositionContext(context);
+
+  const categoryPrompts: Record<string, string> = {
+    captions: [
+      `Using /hyperframes, add the "${title}" caption style (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Transcribe the audio with /hyperframes-media, then wire the transcript into this caption component. Match the font colors and animation timing to my composition's design tokens. Place it as an overlay above the main content with the highest z-index.`,
+    ].join("\n\n"),
+    vfx: [
+      `Using /hyperframes, add the "${title}" VFX (registry: ${name}) as a full-screen overlay on my composition.`,
+      `${description}`,
+      `This is a WebGL effect that requires chrome://flags/#html-in-canvas. Layer it on top of all content, adjust the shader uniforms and color palette to complement my scene, and set the duration to match the composition length.`,
+    ].join("\n\n"),
+    transitions: [
+      `Using /hyperframes, add the "${title}" transition (registry: ${name}) between my scenes.`,
+      `${description}`,
+      `Place this transition at the cut point between the current scene and the next. Set the duration to 0.5–1s, position it at the scene boundary on the timeline, and make sure the z-index is above both scenes. Adjust colors to match my palette.`,
+    ].join("\n\n"),
+    effects: [
+      `Using /hyperframes, add the "${title}" effect (registry: ${name}) as an overlay on my composition.`,
+      `${description}`,
+      `Layer this on top of the current content. Adjust the opacity, colors, and animation timing to enhance the scene without overwhelming the main content.`,
+    ].join("\n\n"),
+    social: [
+      `Using /hyperframes, add the "${title}" template (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace the placeholder text, handle, and avatar with my actual content. Match the typography and colors to my brand. Adjust timing so the elements animate in sync with the voiceover.`,
+    ].join("\n\n"),
+    data: [
+      `Using /hyperframes, add the "${title}" visualization (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace the placeholder data with my actual values and labels. Adjust the color scale, animation stagger timing, and typography to match my composition's design system. Size it to fit the current viewport.`,
+    ].join("\n\n"),
+    scenes: [
+      `Using /hyperframes, add the "${title}" scene (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace all placeholder text, images, and content with my actual material. Match fonts, colors, and layout to my existing design tokens. Set the timeline position and duration to fit the narrative flow.`,
+    ].join("\n\n"),
+  };
+
+  const instruction =
+    categoryPrompts[category] ??
+    [
+      `Using /hyperframes, add the "${title}" ${kind} (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Customize it to match my composition's design and timeline.`,
+    ].join("\n\n");
+
+  return [instruction, "", "## Current composition state", "", compositionInfo].join("\n");
+}
+
 function BlockCard({
   name,
   title,
+  description,
+  blockType,
   duration,
   category,
   tags,
   posterUrl,
   videoUrl,
-  dimensions,
   onAdd,
+  onShowPrompt,
   onPreview,
 }: {
   name: string;
   title: string;
+  description: string;
+  blockType: string;
   duration?: number;
   category: BlockCategory;
   tags?: string[];
   posterUrl?: string;
   videoUrl?: string;
-  dimensions?: { width: number; height: number };
-  onAdd: () => void;
+  onAdd?: () => void;
+  onShowPrompt?: (info: { title: string; prompt: string }) => void;
   onPreview?: (preview: BlockPreviewInfo | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -214,7 +337,7 @@ function BlockCard({
   const handleAdd = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (adding) return;
+      if (adding || !onAdd) return;
       setAdding(true);
       onAdd();
       setTimeout(() => setAdding(false), 1000);
@@ -222,12 +345,38 @@ function BlockCard({
     [onAdd, adding],
   );
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent) => {
-      e.dataTransfer.effectAllowed = "copy";
-      e.dataTransfer.setData(TIMELINE_BLOCK_MIME, JSON.stringify({ name, duration, dimensions }));
+  const { activeCompPath, compositionDimensions } = useStudioContext();
+
+  const handleShowPrompt = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const state = usePlayerStore.getState();
+      const context: CompositionContext = {
+        currentTime: state.currentTime,
+        activeCompPath,
+        elements: state.elements.map((el) => ({
+          id: el.id,
+          start: el.start,
+          duration: el.duration,
+          track: el.track,
+          label: el.label,
+          compositionSrc: el.compositionSrc,
+        })),
+        compositionDimensions: compositionDimensions ?? undefined,
+      };
+      const prompt = buildAgentPrompt(title, name, description, category, blockType, context);
+      onShowPrompt?.({ title, prompt });
     },
-    [name, duration, dimensions],
+    [
+      title,
+      name,
+      description,
+      category,
+      blockType,
+      activeCompPath,
+      compositionDimensions,
+      onShowPrompt,
+    ],
   );
 
   return (
@@ -235,8 +384,6 @@ function BlockCard({
       className="group/card rounded-md overflow-hidden cursor-pointer transition-colors bg-neutral-900 hover:bg-neutral-800"
       onPointerEnter={handleEnter}
       onPointerLeave={handleLeave}
-      draggable
-      onDragStart={handleDragStart}
     >
       {/* Thumbnail */}
       <div className="aspect-video w-full overflow-hidden relative">
@@ -267,14 +414,52 @@ function BlockCard({
           </div>
         )}
 
-        {/* Add button overlay */}
-        <button
-          type="button"
-          onClick={handleAdd}
-          className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity"
-        >
-          <span className="text-[10px] font-semibold text-white">{adding ? "Added" : "Add"}</span>
-        </button>
+        {/* Action overlay */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity">
+          {onAdd && (
+            <button
+              type="button"
+              onClick={handleAdd}
+              title="Add to composition at current time"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-colors"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              {adding ? "Added!" : "Add"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleShowPrompt}
+            title="Generate a prompt to paste into your AI agent"
+            className={`flex items-center gap-1.5 px-3 ${onAdd ? "py-1" : "py-1.5"} rounded-md transition-colors ${
+              onAdd
+                ? "bg-white/15 text-white/90 hover:bg-white/25 text-[9px]"
+                : "bg-white text-black hover:bg-neutral-200 text-[10px] font-semibold"
+            }`}
+          >
+            <svg
+              width={onAdd ? 9 : 11}
+              height={onAdd ? 9 : 11}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Ask agent
+          </button>
+        </div>
 
         {/* Badges */}
         <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
@@ -301,6 +486,96 @@ function BlockCard({
           <span className={`text-[8px] ${colors.text}`}>
             {BLOCK_CATEGORIES.find((c) => c.id === category)?.label}
           </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromptPreviewModal({
+  title,
+  prompt,
+  onClose,
+}: {
+  title: string;
+  prompt: string;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(prompt);
+  const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [value]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-[560px] max-h-[80vh] flex flex-col rounded-2xl border border-neutral-800 bg-neutral-950 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800/60">
+          <div>
+            <h3 className="text-sm font-medium text-neutral-200">Ask agent</h3>
+            <p className="text-xs text-neutral-500 mt-0.5">{title}</p>
+          </div>
+          <button
+            className="p-1 rounded-md text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50"
+            onClick={onClose}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <p className="text-[11px] text-neutral-500 mb-2">
+            Edit the prompt below, then copy and paste into your AI agent
+          </p>
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleCopy();
+              if (e.key === "Escape") onClose();
+            }}
+            className="w-full min-h-[240px] text-[11px] text-neutral-200 leading-relaxed font-mono bg-neutral-900/60 rounded-lg p-3 border border-neutral-800 resize-y focus:outline-none focus:border-studio-accent/60 focus:ring-1 focus:ring-studio-accent/30"
+          />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 border-t border-neutral-800/60">
+          <span className="text-[11px] text-neutral-600">
+            {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+Enter to copy
+          </span>
+          <button
+            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              copied
+                ? "bg-emerald-500 text-white"
+                : "bg-studio-accent/90 text-neutral-950 hover:bg-studio-accent"
+            }`}
+            onClick={handleCopy}
+          >
+            {copied ? "Copied!" : "Copy prompt"}
+          </button>
         </div>
       </div>
     </div>
