@@ -2,11 +2,11 @@
   "source": "heygen-com/hyperframes",
   "skills": {
     "embedded-captions": {
-      "hash": "36a43fc349052ab0",
+      "hash": "fe837c08dd47b077",
       "files": 144
     },
     "faceless-explainer": {
-      "hash": "027ae009f5255130",
+      "hash": "7f8f31695723756b",
       "files": 18
     },
     "figma": {
@@ -14,11 +14,11 @@
       "files": 1
     },
     "general-video": {
-      "hash": "c266136f4ffa2157",
+      "hash": "e26710c3537b3a07",
       "files": 1
     },
     "hyperframes": {
-      "hash": "42ba4448d7552099",
+      "hash": "24ec436b52957fcc",
       "files": 1
     },
     "hyperframes-animation": {
@@ -30,12 +30,12 @@
       "files": 7
     },
     "hyperframes-core": {
-      "hash": "788462fc5c3b9ee1",
-      "files": 13
+      "hash": "2b1fb57fc6964e76",
+      "files": 14
     },
     "hyperframes-creative": {
-      "hash": "18a14a79da6cbc06",
-      "files": 68
+      "hash": "a5bccc25d291899d",
+      "files": 69
     },
     "hyperframes-keyframes": {
       "hash": "555c0cd491c40cea",
@@ -50,19 +50,19 @@
       "files": 103
     },
     "motion-graphics": {
-      "hash": "2bd92504783e8a0c",
+      "hash": "96ed2f7d8051b009",
       "files": 23
     },
     "music-to-video": {
-      "hash": "3e1e91e93a7a80d0",
+      "hash": "901a19d0680f8c1b",
       "files": 132
     },
     "pr-to-video": {
-      "hash": "088f89960ecaf0ed",
+      "hash": "800b4c11cda4658b",
       "files": 22
     },
     "product-launch-video": {
-      "hash": "cc8f9e4aeb87aa4b",
+      "hash": "4f858cc4d59324da",
       "files": 20
     },
     "remotion-to-hyperframes": {
@@ -70,15 +70,15 @@
       "files": 70
     },
     "slideshow": {
-      "hash": "3dd62c326ccf25eb",
+      "hash": "19a0332616bc397b",
       "files": 2
     },
     "talking-head-recut": {
-      "hash": "ff57c239045342a9",
+      "hash": "d5c51342625c9952",
       "files": 27
     },
     "website-to-video": {
-      "hash": "baa2f956f3b7a12d",
+      "hash": "32bdb559f4d18f99",
       "files": 32
     }
   }
