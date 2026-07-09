@@ -108,4 +108,47 @@ describe("IframePreviewAdapter.attachSync", () => {
       ),
     ).toBe("#f00");
   });
+
+  it("does NOT mirror a /script/gsap patch onto the live <script> tag", async () => {
+    const html = `<!DOCTYPE html>
+<html><body>
+  <div data-hf-id="hf-stage" data-hf-root style="width:1280px;height:720px" data-duration="5">
+    <div data-hf-id="hf-box" style="opacity:0"></div>
+  </div>
+  <script>var tl = gsap.timeline({ paused: true });
+window.__timelines = { t: tl };</script>
+</body></html>`;
+    const iframe = mountIframe(html);
+    const liveScriptBefore = iframe.contentDocument!.querySelector("script")!.textContent;
+
+    const comp = await openComposition(html);
+    const adapter = createIframePreviewAdapter(iframe);
+    adapter.attachSync(comp);
+
+    comp.addGsapTween("hf-box", { method: "to", properties: { opacity: 1 }, duration: 1 });
+
+    // The offscreen model's script changed (proves the edit really happened)...
+    expect(comp.serialize()).not.toBe(html);
+    // ...but the LIVE script tag is untouched — script patches are never mirrored.
+    expect(iframe.contentDocument!.querySelector("script")!.textContent).toBe(liveScriptBefore);
+  });
+
+  it("DOES mirror a /style/css (stylesheet) patch onto the live <style> tag", async () => {
+    const html = `<!DOCTYPE html>
+<html><body>
+  <div data-hf-id="hf-stage" data-hf-root style="width:1280px;height:720px" data-duration="5">
+    <div data-hf-id="hf-box" class="boxy"></div>
+  </div>
+  <style>.boxy { color: blue; }</style>
+</body></html>`;
+    const iframe = mountIframe(html);
+    const comp = await openComposition(html);
+    const adapter = createIframePreviewAdapter(iframe);
+    adapter.attachSync(comp);
+
+    comp.dispatch({ type: "setClassStyle", selector: ".boxy", styles: { color: "green" } });
+
+    const liveStyle = iframe.contentDocument!.querySelector("style")!.textContent ?? "";
+    expect(liveStyle).toContain("green");
+  });
 });
