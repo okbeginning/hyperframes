@@ -4,6 +4,18 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const producerState = vi.hoisted(() => ({
   createdJobs: [] as Array<Record<string, unknown>>,
   resolveConfigCalls: [] as Array<Record<string, unknown>>,
+  // Overridable per-test hook so the DE-parallel-router-trial tests can
+  // mutate the job (perfSummary/errorDetails) or throw, without perturbing
+  // every other test in this file that expects a plain no-op resolve.
+  executeImpl: async (_job: Record<string, unknown>): Promise<void> => undefined,
+}));
+
+const configState = vi.hoisted(() => ({
+  // Defaults to "trial already fired" so the pre-existing renderLocal tests
+  // below (which predate the DE-parallel-router trial and don't expect
+  // HF_DE_PARALLEL_ROUTER to be touched) keep their exact prior behavior.
+  config: { telemetryEnabled: true, deParallelRouterTrialFired: true } as Record<string, unknown>,
+  writeConfigCalls: [] as Array<Record<string, unknown>>,
 }));
 
 const preflightState = vi.hoisted(() => ({
@@ -41,8 +53,16 @@ vi.mock("../utils/producer.js", () => ({
       producerState.createdJobs.push(config);
       return { config, progress: 100 };
     }),
-    executeRenderJob: vi.fn(async () => undefined),
+    executeRenderJob: vi.fn(async (job: Record<string, unknown>) => producerState.executeImpl(job)),
   })),
+}));
+
+vi.mock("../telemetry/config.js", () => ({
+  readConfig: vi.fn(() => ({ ...configState.config })),
+  writeConfig: vi.fn((config: Record<string, unknown>) => {
+    configState.config = { ...config };
+    configState.writeConfigCalls.push({ ...config });
+  }),
 }));
 
 vi.mock("../telemetry/events.js", () => ({
@@ -81,13 +101,18 @@ describe("renderLocal browser GPU config", () => {
   beforeEach(() => {
     producerState.createdJobs = [];
     producerState.resolveConfigCalls = [];
+    producerState.executeImpl = async () => undefined;
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: true };
+    configState.writeConfigCalls = [];
     savedEnv.clear();
     savedEnv.set("HYPERFRAMES_FFMPEG_PATH", process.env.HYPERFRAMES_FFMPEG_PATH);
     savedEnv.set("HYPERFRAMES_FFPROBE_PATH", process.env.HYPERFRAMES_FFPROBE_PATH);
     savedEnv.set("PRODUCER_HEADLESS_SHELL_PATH", process.env.PRODUCER_HEADLESS_SHELL_PATH);
+    savedEnv.set("HF_DE_PARALLEL_ROUTER", process.env.HF_DE_PARALLEL_ROUTER);
     delete process.env.HYPERFRAMES_FFMPEG_PATH;
     delete process.env.HYPERFRAMES_FFPROBE_PATH;
     delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
+    delete process.env.HF_DE_PARALLEL_ROUTER;
   });
 
   afterEach(() => {
@@ -411,6 +436,110 @@ describe("renderLocal browser GPU config", () => {
     expect(exit).not.toHaveBeenCalled();
     expect(() => vi.advanceTimersByTime(100)).toThrow("process.exit:0");
     expect(exit).toHaveBeenCalledWith(0);
+  });
+});
+
+describe("renderLocal — DE parallel-router CLI trial", () => {
+  let renderLocal: typeof import("./render.js").renderLocal;
+  const savedEnv = new Map<string, string | undefined>();
+
+  beforeAll(async () => {
+    ({ renderLocal } = await import("./render.js"));
+  });
+
+  beforeEach(() => {
+    producerState.createdJobs = [];
+    producerState.executeImpl = async () => undefined;
+    configState.writeConfigCalls = [];
+    savedEnv.clear();
+    savedEnv.set("HF_DE_PARALLEL_ROUTER", process.env.HF_DE_PARALLEL_ROUTER);
+    savedEnv.set("HYPERFRAMES_FFMPEG_PATH", process.env.HYPERFRAMES_FFMPEG_PATH);
+    savedEnv.set("HYPERFRAMES_FFPROBE_PATH", process.env.HYPERFRAMES_FFPROBE_PATH);
+    savedEnv.set("PRODUCER_HEADLESS_SHELL_PATH", process.env.PRODUCER_HEADLESS_SHELL_PATH);
+    delete process.env.HF_DE_PARALLEL_ROUTER;
+    delete process.env.HYPERFRAMES_FFMPEG_PATH;
+    delete process.env.HYPERFRAMES_FFPROBE_PATH;
+    delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    vi.clearAllMocks();
+  });
+
+  const baseOptions = {
+    fps: { num: 30, den: 1 },
+    quality: "standard" as const,
+    format: "mp4" as const,
+    gpu: false,
+    browserGpuMode: "software" as const,
+    hdrMode: "auto" as const,
+    quiet: true,
+  };
+
+  it("enables the trial (sets the env var) on a fresh install with telemetry on", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: false };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+  });
+
+  it("does not override an env var the user already set themselves", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: false };
+    process.env.HF_DE_PARALLEL_ROUTER = "false";
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+  });
+
+  it("does not enable the trial once it has already fired for this install", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: true };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+  });
+
+  it("does not enable the trial when telemetry is disabled", async () => {
+    configState.config = { telemetryEnabled: false, deParallelRouterTrialFired: false };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+  });
+
+  it("persists deParallelRouterTrialFired when the router actually engages on a successful render", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: false };
+    producerState.executeImpl = async (job) => {
+      job.perfSummary = {
+        resolution: { width: 100, height: 100 },
+        drawElement: { parallelRouter: "routed" },
+      };
+    };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(configState.writeConfigCalls).toContainEqual(
+      expect.objectContaining({ deParallelRouterTrialFired: true }),
+    );
+  });
+
+  it("does not persist the trial as fired when the router never became eligible for this render", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: false };
+    producerState.executeImpl = async (job) => {
+      job.perfSummary = { resolution: { width: 100, height: 100 }, drawElement: {} };
+    };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(configState.writeConfigCalls).toHaveLength(0);
+  });
+
+  it("persists the trial as fired from the failure path when the router engaged before a hard crash", async () => {
+    configState.config = { telemetryEnabled: true, deParallelRouterTrialFired: false };
+    producerState.executeImpl = async (job) => {
+      job.errorDetails = { observability: { capture: { deParallelRouter: "routed" } } };
+      throw new Error("worker crashed");
+    };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", { ...baseOptions, throwOnError: true }).catch(
+      () => {},
+    );
+    expect(configState.writeConfigCalls).toContainEqual(
+      expect.objectContaining({ deParallelRouterTrialFired: true }),
+    );
   });
 });
 

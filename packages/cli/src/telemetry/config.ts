@@ -63,6 +63,16 @@ export interface HyperframesConfig {
   skillsOutdatedCount?: number;
   /** How many skills were missing (not installed) at the last check. */
   skillsMissingCount?: number;
+  /**
+   * True once the DE parallel-router experiment ("HF_DE_PARALLEL_ROUTER")
+   * has actually engaged (routed or reverted — either produces telemetry)
+   * on a render from this install. The CLI enables the experiment for free
+   * on renders from a fresh install until this fires once, then never
+   * touches it again — a one-shot trial to get real-traffic router
+   * telemetry without requiring anyone to manually opt in via env var.
+   * See `renderLocal`'s `maybeEnableDeParallelRouterTrial`.
+   */
+  deParallelRouterTrialFired?: boolean;
 }
 
 const DEFAULT_CONFIG: HyperframesConfig = {
@@ -108,6 +118,7 @@ export function readConfig(): HyperframesConfig {
       skillsUpdateAvailable: parsed.skillsUpdateAvailable,
       skillsOutdatedCount: parsed.skillsOutdatedCount,
       skillsMissingCount: parsed.skillsMissingCount,
+      deParallelRouterTrialFired: parsed.deParallelRouterTrialFired,
     };
 
     cachedConfig = config;

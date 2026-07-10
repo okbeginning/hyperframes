@@ -66,6 +66,7 @@ import {
   trackRenderPreflightRejected,
 } from "../telemetry/events.js";
 import { maybePromptRenderFeedback } from "../telemetry/feedback.js";
+import { readConfig, writeConfig } from "../telemetry/config.js";
 import { renderJobObservabilityTelemetryPayload } from "../telemetry/renderObservability.js";
 import { normalizeSkillSlug } from "../telemetry/skill.js";
 import { bytesToMb } from "../telemetry/system.js";
@@ -1420,6 +1421,7 @@ export async function renderLocal(
   }
 
   const producer = await loadProducer();
+  const deParallelRouterTrialArmed = maybeEnableDeParallelRouterTrial(options.quiet);
 
   const startTime = Date.now();
   const logger = createRenderTelemetryLogger(
@@ -1462,6 +1464,7 @@ export async function renderLocal(
   try {
     await producer.executeRenderJob(job, projectDir, outputPath, onProgress);
   } catch (error: unknown) {
+    maybeConsumeDeParallelRouterTrial(deParallelRouterTrialArmed, job);
     handleRenderError(
       error,
       options,
@@ -1473,6 +1476,7 @@ export async function renderLocal(
     );
   }
 
+  maybeConsumeDeParallelRouterTrial(deParallelRouterTrialArmed, job);
   const elapsed = Date.now() - startTime;
   trackRenderMetrics(job, elapsed, options, false);
   printRenderComplete(
@@ -1604,6 +1608,53 @@ function createNoopProducerLogger(): ProducerLogger {
       return true;
     },
   };
+}
+
+/**
+ * Enable the DE parallel-router experiment (`HF_DE_PARALLEL_ROUTER`, default
+ * off) for this render, one time per install, so we get real-traffic router
+ * telemetry (revert rate, verify-db distribution) without requiring anyone
+ * to manually set the env var — see `HyperframesConfig.deParallelRouterTrialFired`.
+ * Returns whether this call armed it (so the caller knows to check for
+ * consumption afterward) — false if it's already fired once, or the user
+ * already set the env var themselves (never override an explicit choice),
+ * or telemetry is disabled (no point risking the experimental path if we
+ * can't even record the resulting signal).
+ */
+function maybeEnableDeParallelRouterTrial(quiet: boolean): boolean {
+  if (process.env.HF_DE_PARALLEL_ROUTER !== undefined) return false;
+  const config = readConfig();
+  if (config.deParallelRouterTrialFired || !config.telemetryEnabled) return false;
+  process.env.HF_DE_PARALLEL_ROUTER = "true";
+  if (!quiet) {
+    console.log(
+      c.dim(
+        "  Trying the experimental parallel drawElement capture path once for this install " +
+          "(opt out: HF_DE_PARALLEL_ROUTER=false)",
+      ),
+    );
+  }
+  return true;
+}
+
+/**
+ * After a trial-armed render, persist that the experiment actually engaged
+ * (routed or reverted — either produces telemetry) so it's never enabled
+ * again for this install. Checks both the success path (`perfSummary`) and
+ * the failure path (`errorDetails.observability.capture`, mutated in place
+ * before a hard failure throws) — a crash while routed still counts as a
+ * fired trial. No-ops if the router never actually became eligible for this
+ * render (e.g. too few frames): the trial stays available for a future run.
+ */
+function maybeConsumeDeParallelRouterTrial(trialArmed: boolean, job: RenderJob): void {
+  if (!trialArmed) return;
+  const engaged =
+    job.perfSummary?.drawElement?.parallelRouter ??
+    job.errorDetails?.observability?.capture.deParallelRouter;
+  if (engaged === undefined) return;
+  const config = readConfig();
+  config.deParallelRouterTrialFired = true;
+  writeConfig(config);
 }
 
 function handleRenderError(
