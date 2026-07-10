@@ -339,6 +339,12 @@ function printSnapshotSection(report: CheckReport): void {
   } else {
     console.log(`  ${c.success("◇")} ${report.snapshots.files.length} PNG(s) saved`);
     for (const file of report.snapshots.files) console.log(`    ${c.dim(file)}`);
+    if (report.snapshots.findingFiles.length > 0) {
+      console.log(
+        `  ${c.success("◇")} ${report.snapshots.findingFiles.length} finding crop(s) saved`,
+      );
+      for (const file of report.snapshots.findingFiles) console.log(`    ${c.dim(file)}`);
+    }
   }
 }
 

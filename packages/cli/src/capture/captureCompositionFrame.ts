@@ -286,6 +286,141 @@ export async function waitForCompositionFonts(
     .catch(() => {});
 }
 
+export interface CropRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CropCanvas {
+  width: number;
+  height: number;
+}
+
+export type ZoomTarget =
+  | { kind: "selector"; selector: string }
+  | { kind: "region"; region: CropRegion };
+
+// Four bare comma-separated numbers is unambiguous — no valid CSS selector
+// parses as that shape — so it always means "exact pixel region".
+const ZOOM_REGION_PATTERN = /^-?\d+(?:\.\d+)?(?:,-?\d+(?:\.\d+)?){3}$/;
+const DEFAULT_ZOOM_PADDING_PX = 24;
+
+/** Parse `snapshot --zoom` into either a CSS selector or an exact pixel region "x,y,w,h". */
+export function parseZoomTarget(value: string): ZoomTarget {
+  const trimmed = value.trim();
+  if (ZOOM_REGION_PATTERN.test(trimmed)) {
+    const [x, y, width, height] = trimmed.split(",").map(Number) as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    return { kind: "region", region: { x, y, width, height } };
+  }
+  return { kind: "selector", selector: trimmed };
+}
+
+/** Clamp a region to the canvas bounds — Puppeteer's clip screenshot rejects a
+ * region that spills outside the viewport. Keeps at least 1px on each side. */
+export function clampCropRegion(region: CropRegion, canvas: CropCanvas): CropRegion {
+  const x = Math.max(0, Math.min(region.x, canvas.width));
+  const y = Math.max(0, Math.min(region.y, canvas.height));
+  const x2 = Math.max(x + 1, Math.min(region.x + region.width, canvas.width));
+  const y2 = Math.max(y + 1, Math.min(region.y + region.height, canvas.height));
+  return { x, y, width: x2 - x, height: y2 - y };
+}
+
+/** Pad a region on every side (context around a zoomed element), then clamp. */
+export function padCropRegion(
+  region: CropRegion,
+  canvas: CropCanvas,
+  paddingPx: number,
+): CropRegion {
+  return clampCropRegion(
+    {
+      x: region.x - paddingPx,
+      y: region.y - paddingPx,
+      width: region.width + paddingPx * 2,
+      height: region.height + paddingPx * 2,
+    },
+    canvas,
+  );
+}
+
+export interface ZoomSelectorPage {
+  evaluate(
+    pageFunction: (selector: string) => CropRegion | null,
+    selector: string,
+  ): Promise<CropRegion | null>;
+}
+
+/**
+ * Resolve a `--zoom` target to a concrete crop region. A selector resolves to
+ * its live bbox (padded ~24px, then clamped); an explicit region is used
+ * as-is (clamped only, never padded — region form crops exactly). A selector
+ * matching nothing throws: a loud error beats a silent full-frame fallback.
+ */
+// A selector can match an element whose visible box is gone at the sampled
+// time — collapsed (display:none mid-timeline) or animated off-canvas, where
+// clamping leaves a pixel-wide remnant. Either way the crop would be a sliver
+// that tells an agent nothing, so the final clamped region is what's guarded
+// and callers skip the frame on null. Explicit x,y,w,h regions stay literal.
+const MIN_CROP_REGION_PX = 8;
+
+export async function resolveCropRegion(
+  page: ZoomSelectorPage,
+  target: ZoomTarget,
+  canvas: CropCanvas,
+  paddingPx = DEFAULT_ZOOM_PADDING_PX,
+): Promise<CropRegion | null> {
+  if (target.kind === "region") return clampCropRegion(target.region, canvas);
+  const bbox = await page.evaluate((selector) => {
+    const element = document.querySelector(selector);
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }, target.selector);
+  if (!bbox) throw new Error(`--zoom selector matched no element: ${target.selector}`);
+  const region = padCropRegion(bbox, canvas, paddingPx);
+  if (region.width < MIN_CROP_REGION_PX || region.height < MIN_CROP_REGION_PX) return null;
+  return region;
+}
+
+export interface CropCapturePage {
+  viewport(): { width: number; height: number; deviceScaleFactor?: number } | null;
+  setViewport(viewport: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+  }): Promise<void>;
+  screenshot(options: { clip: CropRegion; type: "png" }): Promise<Uint8Array>;
+}
+
+/**
+ * Capture a high-density crop of `region`: raise `deviceScaleFactor` to
+ * `scale`, take a clip screenshot, then restore the original viewport.
+ * Deliberately NOT CSS zoom or a viewport resize — DSF only changes how
+ * densely Chrome rasterizes the existing CSS-pixel layout, so the
+ * composition's layout (and its render determinism) is untouched. The PNG
+ * comes out at `region.width * scale` real device pixels, not an upscale.
+ */
+export async function captureRegionCrop(
+  page: CropCapturePage,
+  region: CropRegion,
+  scale: number,
+): Promise<Buffer> {
+  const original = page.viewport();
+  if (original) await page.setViewport({ ...original, deviceScaleFactor: scale });
+  try {
+    const shot = await page.screenshot({ clip: region, type: "png" });
+    return Buffer.isBuffer(shot) ? shot : Buffer.from(shot);
+  } finally {
+    if (original) await page.setViewport(original);
+  }
+}
+
 export async function runFfmpegOnce(
   ffmpegPath: string,
   args: readonly string[],

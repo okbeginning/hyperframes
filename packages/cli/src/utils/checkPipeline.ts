@@ -30,12 +30,14 @@ import {
 } from "../commands/contrast-bg.js";
 import type {
   AnchoredLayoutIssue,
+  CheckAnnotationBox,
   CheckAuditDriver,
   CheckBbox,
   CheckBrowserResult,
   CheckContrastFinding,
   CheckDependencies,
   CheckFinding,
+  CheckFindingCropRequest,
   CheckGeometryCandidate,
   CheckOptions,
   CheckReport,
@@ -54,6 +56,7 @@ export type {
   CheckBrowserResult,
   CheckDependencies,
   CheckFinding,
+  CheckFindingCropRequest,
   CheckOptions,
   CheckReport,
   CheckSection,
@@ -356,13 +359,26 @@ async function collectGridSamples(
   };
   for (const time of mergeSampleTimes(grid.layoutSamples, motion.times)) {
     await driver.seek(time);
+    // Findings collected for THIS sample time, so the overview overlay (below)
+    // only ever annotates a frame with defects that are actually valid at
+    // that render time — never a stale bbox from an earlier/later sample.
+    const issuesAtTime: AnchoredLayoutIssue[] = [];
     if (layoutSet.has(time)) {
-      collected.layoutIssues.push(...(await driver.collectLayout(time, options.tolerance)));
+      const layoutIssues = await driver.collectLayout(time, options.tolerance);
+      collected.layoutIssues.push(...layoutIssues);
+      issuesAtTime.push(...layoutIssues);
     }
     if (canvas) {
-      collected.layoutIssues.push(
-        ...(await collectGeometryAt(driver, options, grid, canvas, time, geometrySeen)),
+      const geometryIssues = await collectGeometryAt(
+        driver,
+        options,
+        grid,
+        canvas,
+        time,
+        geometrySeen,
       );
+      collected.layoutIssues.push(...geometryIssues);
+      issuesAtTime.push(...geometryIssues);
     }
     if (motionSet.has(time)) {
       collected.motionFrames.push(
@@ -371,13 +387,27 @@ async function collectGridSamples(
     }
     if (contrastSet.has(time)) {
       const contrastStart = Date.now();
-      const capture = await driver.collectContrast(time);
+      // Annotation is a --snapshots-only nicety — skip building it (and the
+      // driver's extra overlay screenshot) when nothing will use it; the call
+      // shape without --snapshots stays exactly what it was before this existed.
+      const capture = options.snapshots
+        ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
+        : await driver.collectContrast(time);
       collected.contrastMs += Date.now() - contrastStart;
       collected.contrastEntries.push(...capture.entries);
       collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
     }
   }
   return collected;
+}
+
+/** Error-severity findings with real geometry become labeled overview boxes.
+ * Contrast failures are annotated separately by the driver itself, since
+ * they're only known once contrast measurement for this sample completes. */
+function annotationBoxesFrom(issues: AnchoredLayoutIssue[]): CheckAnnotationBox[] {
+  return issues
+    .filter((issue) => issue.severity === "error" && issue.bbox.width > 0 && issue.bbox.height > 0)
+    .map((issue, index) => ({ label: `${index + 1} ${issue.code}`, bbox: issue.bbox }));
 }
 
 export async function runAuditGrid(
@@ -456,21 +486,87 @@ export async function runCheckPipeline(
     browser.runtimeFindings.push(runtimeFailure(error));
   }
 
-  const snapshotFiles: string[] = [];
-  if (options.snapshots) {
-    for (let index = 0; index < browser.screenshots.length; index += 1) {
-      const shot = browser.screenshots[index];
-      if (!shot) continue;
-      try {
-        snapshotFiles.push(
-          await dependencies.writeSnapshot(project.dir, index, shot.time, shot.pngBase64),
-        );
-      } catch (error) {
-        browser.runtimeFindings.push(runtimeFailure(error, "snapshot_write_failed"));
-      }
+  const snapshotFiles = options.snapshots
+    ? await writeContrastSnapshots(dependencies, project.dir, browser)
+    : [];
+  const report = buildReport(options, lint, browser, motion, [], snapshotFiles);
+  return options.snapshots
+    ? await withFindingCrops(dependencies, project, options, report)
+    : report;
+}
+
+/** Persists the contrast pass's already-captured overview PNGs (or the
+ * annotated versions — see `collectContrast`'s overlay). A write failure
+ * becomes a runtime finding rather than aborting the whole report. */
+async function writeContrastSnapshots(
+  dependencies: CheckDependencies,
+  projectDir: string,
+  browser: CheckBrowserResult,
+): Promise<string[]> {
+  const files: string[] = [];
+  for (let index = 0; index < browser.screenshots.length; index += 1) {
+    const shot = browser.screenshots[index];
+    if (!shot) continue;
+    try {
+      files.push(await dependencies.writeSnapshot(projectDir, index, shot.time, shot.pngBase64));
+    } catch (error) {
+      browser.runtimeFindings.push(runtimeFailure(error, "snapshot_write_failed"));
     }
   }
-  return buildReport(options, lint, browser, motion, [], snapshotFiles);
+  return files;
+}
+
+/** Finding crops are bonus evidence, not gating — no eligible finding, or a
+ * capture failure (e.g. a second Chrome launch failing), returns the report
+ * unchanged rather than sinking an otherwise-good run. */
+async function withFindingCrops(
+  dependencies: CheckDependencies,
+  project: ProjectDir,
+  options: CheckOptions,
+  report: CheckReport,
+): Promise<CheckReport> {
+  const cropRequests = selectFindingCropRequests(report);
+  if (cropRequests.length === 0) return report;
+  try {
+    const findingFiles = await dependencies.captureFindingCrops(project, options, cropRequests);
+    return { ...report, snapshots: { ...report.snapshots, findingFiles } };
+  } catch {
+    return report;
+  }
+}
+
+const MAX_FINDING_CROPS = 12;
+
+/** Which error findings get a `finding-NN-<code>.png` crop for `check --snapshots`:
+ * error severity, a real (non-zero) bbox, capped at 12. Pure and order-preserving
+ * so it's directly unit-testable without a browser. */
+export function selectFindingCropRequests(report: CheckReport): CheckFindingCropRequest[] {
+  const candidates: CheckFinding[] = [
+    ...report.layout.findings,
+    ...report.motion.findings,
+    ...report.contrast.findings,
+    ...report.runtime.findings,
+  ];
+  const requests: CheckFindingCropRequest[] = [];
+  for (const finding of candidates) {
+    if (requests.length >= MAX_FINDING_CROPS) break;
+    if (finding.severity !== "error" || !hasRealBbox(finding.bbox)) continue;
+    requests.push({
+      filename: findingCropFilename(requests.length, finding.code),
+      time: finding.time,
+      bbox: finding.bbox,
+    });
+  }
+  return requests;
+}
+
+function hasRealBbox(bbox: CheckBbox): boolean {
+  return bbox.width > 0 && bbox.height > 0;
+}
+
+export function findingCropFilename(index: number, code: string): string {
+  const safeCode = code.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `finding-${String(index).padStart(2, "0")}-${safeCode}.png`;
 }
 
 export function checkExitCode(report: CheckReport): 0 | 1 {
@@ -587,6 +683,7 @@ function buildReport(
       enabled: options.snapshots,
       files: snapshotFiles,
       times: options.snapshots ? browser.screenshots.map((shot) => shot.time) : [],
+      findingFiles: [],
     },
   };
   trackCheckReport({
@@ -771,9 +868,20 @@ async function writeSnapshot(
   return join("snapshots", filename);
 }
 
+async function captureFindingCrops(
+  project: ProjectDir,
+  options: CheckOptions,
+  requests: CheckFindingCropRequest[],
+): Promise<string[]> {
+  const module = await import("./checkBrowser.js");
+  // Handed over the same way runBrowserCheck is (checkBrowser never imports this module back).
+  return module.captureFindingCrops(project, options, requests);
+}
+
 const DEFAULT_DEPENDENCIES: CheckDependencies = {
   lintProject,
   resolveMotionSpec,
   runBrowserCheck,
   writeSnapshot,
+  captureFindingCrops,
 };

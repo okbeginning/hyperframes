@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  captureRegionCrop,
+  clampCropRegion,
+  padCropRegion,
+  parseZoomTarget,
   resolveCliChromeGpuMode,
+  resolveCropRegion,
   runFfmpegOnce,
   seekCompositionTimeline,
   type CompositionSeekPage,
@@ -178,6 +183,130 @@ describe("screenshot Chrome arguments", () => {
       /args:\s*buildChromeArgs\(\s*\{[^}]*captureMode:\s*"screenshot"[^}]*\},\s*\{\s*browserGpuMode:\s*options\.browserGpuMode\s*\},?\s*\),/,
     );
     expect(layoutSource).toMatch(defaultScreenshotArgs);
+  });
+});
+
+describe("parseZoomTarget", () => {
+  it("parses four comma-separated numbers as an exact region", () => {
+    expect(parseZoomTarget("100,50,400,300")).toEqual({
+      kind: "region",
+      region: { x: 100, y: 50, width: 400, height: 300 },
+    });
+  });
+
+  it("treats anything else as a CSS selector", () => {
+    expect(parseZoomTarget("#headline")).toEqual({ kind: "selector", selector: "#headline" });
+    expect(parseZoomTarget(".card:nth-of-type(2)")).toEqual({
+      kind: "selector",
+      selector: ".card:nth-of-type(2)",
+    });
+  });
+});
+
+describe("clampCropRegion / padCropRegion", () => {
+  it("clamps a region to the canvas bounds", () => {
+    expect(
+      clampCropRegion({ x: -10, y: -10, width: 50, height: 50 }, { width: 30, height: 30 }),
+    ).toEqual({
+      x: 0,
+      y: 0,
+      width: 30,
+      height: 30,
+    });
+  });
+
+  it("pads a region on every side when it fits within the canvas", () => {
+    expect(
+      padCropRegion({ x: 500, y: 500, width: 100, height: 40 }, { width: 1920, height: 1080 }, 24),
+    ).toEqual({ x: 476, y: 476, width: 148, height: 88 });
+  });
+
+  it("pads then clamps when padding would spill outside the canvas", () => {
+    expect(
+      padCropRegion({ x: 10, y: 10, width: 20, height: 20 }, { width: 200, height: 200 }, 24),
+    ).toEqual({ x: 0, y: 0, width: 54, height: 54 });
+  });
+});
+
+describe("resolveCropRegion", () => {
+  it("resolves a selector to its bbox, padded 24px and clamped", async () => {
+    const page = { evaluate: vi.fn(async () => ({ x: 500, y: 500, width: 100, height: 40 })) };
+
+    const region = await resolveCropRegion(
+      page,
+      { kind: "selector", selector: "#headline" },
+      { width: 1920, height: 1080 },
+    );
+
+    expect(region).toEqual({ x: 476, y: 476, width: 148, height: 88 });
+  });
+
+  it("crops a region exactly, without padding, when it already fits the canvas", async () => {
+    const page = { evaluate: vi.fn() };
+
+    const region = await resolveCropRegion(
+      page,
+      { kind: "region", region: { x: 100, y: 50, width: 400, height: 300 } },
+      { width: 1920, height: 1080 },
+    );
+
+    expect(region).toEqual({ x: 100, y: 50, width: 400, height: 300 });
+    expect(page.evaluate).not.toHaveBeenCalled();
+  });
+
+  it("throws a clear, loud error when the selector matches nothing", async () => {
+    const page = { evaluate: vi.fn(async () => null) };
+
+    await expect(
+      resolveCropRegion(
+        page,
+        { kind: "selector", selector: "#missing" },
+        { width: 640, height: 360 },
+      ),
+    ).rejects.toThrow("--zoom selector matched no element: #missing");
+  });
+
+  it("returns null when the clamped region is a sliver (element animated off-canvas)", async () => {
+    // Element slid past the right edge: raw bbox is large, but clamping the
+    // padded region to the canvas leaves ~1px — a useless crop.
+    const page = { evaluate: vi.fn(async () => ({ x: 2500, y: 400, width: 600, height: 250 })) };
+
+    const region = await resolveCropRegion(
+      page,
+      { kind: "selector", selector: "#gone-by-now" },
+      { width: 1920, height: 1080 },
+    );
+
+    expect(region).toBeNull();
+  });
+});
+
+describe("captureRegionCrop", () => {
+  it("raises deviceScaleFactor for the clip shot, then restores the original viewport", async () => {
+    const original = { width: 1920, height: 1080, deviceScaleFactor: 1 };
+    const setViewport = vi.fn(async () => undefined);
+    const screenshot = vi.fn(async () => new Uint8Array([1, 2, 3]));
+    const page = { viewport: () => original, setViewport, screenshot };
+    const region = { x: 10, y: 20, width: 100, height: 50 };
+
+    const buffer = await captureRegionCrop(page, region, 3);
+
+    expect(setViewport).toHaveBeenNthCalledWith(1, { ...original, deviceScaleFactor: 3 });
+    expect(screenshot).toHaveBeenCalledWith({ clip: region, type: "png" });
+    expect(setViewport).toHaveBeenNthCalledWith(2, original);
+    expect(buffer).toBeInstanceOf(Buffer);
+    expect(Array.from(buffer)).toEqual([1, 2, 3]);
+  });
+
+  it("honors an explicit scale other than the default", async () => {
+    const original = { width: 800, height: 600 };
+    const setViewport = vi.fn(async () => undefined);
+    const screenshot = vi.fn(async () => new Uint8Array());
+    const page = { viewport: () => original, setViewport, screenshot };
+
+    await captureRegionCrop(page, { x: 0, y: 0, width: 10, height: 10 }, 2);
+
+    expect(setViewport).toHaveBeenNthCalledWith(1, { ...original, deviceScaleFactor: 2 });
   });
 });
 

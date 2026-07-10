@@ -1,6 +1,10 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Page } from "puppeteer-core";
 import {
+  captureRegionCrop,
   openSettledCompositionPage,
+  padCropRegion,
   resolveCliChromeGpuMode,
   seekCompositionTimeline,
   waitForPreferredSeekTarget,
@@ -14,10 +18,12 @@ import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import type {
   AnchoredLayoutIssue,
   CheckAnchor,
+  CheckAnnotationBox,
   CheckAuditDriver,
   CheckBbox,
   CheckBrowserResult,
   CheckFinding,
+  CheckFindingCropRequest,
   CheckGeometryCandidate,
   CheckOptions,
   CheckSeverity,
@@ -35,6 +41,11 @@ const SEEK_OPTIONS = {
   waitForFontsMs: 500,
   settleMs: 120,
 };
+
+// --zoom's default padding/scale, reused here so finding crops carry the same
+// bit of surrounding context an agent gets from `snapshot --zoom`.
+const FINDING_CROP_PADDING_PX = 24;
+const FINDING_CROP_SCALE = 3;
 
 interface RuntimeDraft {
   code: string;
@@ -115,6 +126,53 @@ export async function runBrowserCheck(
       timings: { ...result.timings, launchSettleMs },
       runtimeFindings: drafts.map((draft) => runtimeFinding(draft, rootAnchor)),
     };
+  } finally {
+    await chromeBrowser?.close().catch(() => undefined);
+    await server.close();
+  }
+}
+
+/**
+ * `check --snapshots`'s per-finding evidence crops. Opens its own session
+ * (the main grid session already closed by the time findings are shaped) and
+ * re-seeks to each finding's sample time — renders are deterministic, so a
+ * fresh page at the same time reproduces the same pixels the grid audited.
+ */
+export async function captureFindingCrops(
+  project: ProjectDir,
+  options: CheckOptions,
+  requests: CheckFindingCropRequest[],
+): Promise<string[]> {
+  if (requests.length === 0) return [];
+  const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+  const html = await bundleToSingleHtml(project.dir);
+  const server = await serveStaticProjectHtml(project.dir, html, "Failed to bind check server");
+  let chromeBrowser: import("puppeteer-core").Browser | undefined;
+  const written: string[] = [];
+  try {
+    const session = await openSettledCompositionPage(html, server.url, {
+      renderReadyTimeoutMs: options.timeout,
+      renderReadyWarningSuffix: "capturing finding crops",
+      browserGpuMode: resolveCliChromeGpuMode(),
+    });
+    chromeBrowser = session.browser;
+    const page = session.page;
+    await waitForPreferredSeekTarget(page, 500);
+
+    const snapshotDir = join(project.dir, "snapshots");
+    mkdirSync(snapshotDir, { recursive: true });
+    for (const request of requests) {
+      await seekCompositionTimeline(page, request.time, SEEK_OPTIONS);
+      const canvas = await page.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }));
+      const region = padCropRegion(request.bbox, canvas, FINDING_CROP_PADDING_PX);
+      const buffer = await captureRegionCrop(page, region, FINDING_CROP_SCALE);
+      writeFileSync(join(snapshotDir, request.filename), buffer);
+      written.push(join("snapshots", request.filename));
+    }
+    return written;
   } finally {
     await chromeBrowser?.close().catch(() => undefined);
     await server.close();
@@ -202,7 +260,7 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     collectMotionFrame: (time, selectors, scopes) =>
       collectMotionFrame(page, time, selectors, scopes),
     anchorMotionIssues: (issues) => anchorLayoutIssues(page, issues),
-    collectContrast: (time) => collectContrast(page, time),
+    collectContrast: (time, annotations) => collectContrast(page, time, annotations),
   };
 }
 
@@ -430,20 +488,36 @@ async function compositionBbox(page: Page): Promise<CheckBbox> {
   });
 }
 
-async function collectContrast(page: Page, time: number): Promise<ContrastCapture> {
+async function collectContrast(
+  page: Page,
+  time: number,
+  layoutAnnotations: CheckAnnotationBox[] = [],
+): Promise<ContrastCapture> {
   let prepared: PreparedContrast[] = [];
   try {
     prepared = parsePreparedContrast(await prepareContrast(page, time));
-    const screenshot = await page.screenshot({ encoding: "base64", type: "png" });
-    if (typeof screenshot !== "string") throw new Error("Contrast screenshot was not base64");
+    // This screenshot is the one contrast math is sampled from below — it must
+    // stay untouched by the annotation overlay (finishContrast reads real
+    // painted pixels), so annotation only ever happens on a SECOND shot.
+    const measurementShot = await page.screenshot({ encoding: "base64", type: "png" });
+    if (typeof measurementShot !== "string") throw new Error("Contrast screenshot was not base64");
     const raw = await finishContrast(
       page,
-      screenshot,
+      measurementShot,
       time,
       prepared.map((entry) => entry.raw),
     );
     const finished = raw.flatMap(parseFinishedContrast);
-    return { entries: joinContrastEntries(finished, prepared), pngBase64: screenshot };
+    const entries = joinContrastEntries(finished, prepared);
+    // Contrast failures are only known once measurement above completes, so
+    // they're appended to the layout-derived annotations passed in by the
+    // pipeline rather than being requested up front.
+    const annotations = [
+      ...layoutAnnotations,
+      ...contrastFailureAnnotations(entries, layoutAnnotations.length),
+    ];
+    const pngBase64 = await captureOverviewShot(page, annotations, measurementShot);
+    return { entries, pngBase64 };
   } finally {
     await page
       .evaluate(() => {
@@ -452,6 +526,76 @@ async function collectContrast(page: Page, time: number): Promise<ContrastCaptur
       })
       .catch(() => undefined);
   }
+}
+
+function contrastFailureAnnotations(
+  entries: ContrastAuditEntry[],
+  labelOffset: number,
+): CheckAnnotationBox[] {
+  return entries
+    .filter((entry) => !entry.wcagAA)
+    .map((entry, index) => ({
+      label: `${labelOffset + index + 1} contrast_aa_failure`,
+      bbox: entry.bbox,
+    }));
+}
+
+const ANNOTATION_OVERLAY_ID = "__hyperframesCheckAnnotations";
+
+/**
+ * `check --snapshots`'s overview-frame annotation: every audit for this
+ * sample time has already run (layout/geometry findings arrive via
+ * `annotations`; contrast failures were just measured above), so it's safe
+ * to draw labeled boxes and take one more shot without perturbing anything
+ * audits read. No-op (returns the plain screenshot) when there's nothing to
+ * annotate — the common case stays exactly as before this feature existed.
+ */
+export async function captureOverviewShot(
+  page: Page,
+  annotations: CheckAnnotationBox[],
+  fallbackScreenshot: string,
+): Promise<string> {
+  if (annotations.length === 0) return fallbackScreenshot;
+  await injectAnnotationOverlay(page, annotations);
+  try {
+    const shot = await page.screenshot({ encoding: "base64", type: "png" });
+    return typeof shot === "string" ? shot : fallbackScreenshot;
+  } finally {
+    await removeAnnotationOverlay(page);
+  }
+}
+
+/** One small, self-contained DOM overlay: fixed-position labeled boxes over
+ * each finding's bbox. Injected immediately before the annotated overview
+ * shot and torn down immediately after (see `captureOverviewShot`), so it
+ * never leaks into any audit's DOM reads. */
+async function injectAnnotationOverlay(page: Page, boxes: CheckAnnotationBox[]): Promise<void> {
+  await page.evaluate(
+    (items: CheckAnnotationBox[], overlayId: string) => {
+      const root = document.createElement("div");
+      root.id = overlayId;
+      root.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
+      for (const item of items) {
+        const box = document.createElement("div");
+        box.style.cssText = `position:fixed;left:${item.bbox.x}px;top:${item.bbox.y}px;width:${item.bbox.width}px;height:${item.bbox.height}px;border:2px solid #ff2d55;box-sizing:border-box;`;
+        const label = document.createElement("div");
+        label.textContent = item.label;
+        label.style.cssText =
+          "position:absolute;top:-18px;left:0;background:#ff2d55;color:#fff;font:11px/16px monospace;padding:0 4px;white-space:nowrap;";
+        box.appendChild(label);
+        root.appendChild(box);
+      }
+      document.body.appendChild(root);
+    },
+    boxes,
+    ANNOTATION_OVERLAY_ID,
+  );
+}
+
+async function removeAnnotationOverlay(page: Page): Promise<void> {
+  await page.evaluate((overlayId: string) => {
+    document.getElementById(overlayId)?.remove();
+  }, ANNOTATION_OVERLAY_ID);
 }
 
 async function prepareContrast(page: Page, time: number): Promise<unknown[]> {

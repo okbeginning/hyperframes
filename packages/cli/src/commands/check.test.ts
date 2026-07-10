@@ -13,15 +13,18 @@ import { createCheckCommand } from "./check.js";
 import {
   DEFAULT_CHECK_OPTIONS,
   checkExitCode,
+  findingCropFilename,
   runAuditGrid,
   runCheckPipeline,
   selectContrastTimes,
+  selectFindingCropRequests,
   type AnchoredLayoutIssue,
   type CheckAnchor,
   type CheckAuditDriver,
   type CheckBrowserResult,
   type CheckDependencies,
   type CheckFinding,
+  type CheckFindingCropRequest,
   type CheckOptions,
   type CheckReport,
   type ContrastAuditEntry,
@@ -29,7 +32,12 @@ import {
 } from "../utils/checkPipeline.js";
 import { resolveCompositionViewportFromHtml } from "../utils/compositionViewport.js";
 import type { ProjectLintResult } from "../utils/lintProject.js";
-import type { LayoutIssue, LayoutOverflow, LayoutRect } from "../utils/layoutAudit.js";
+import type {
+  LayoutIssue,
+  LayoutIssueCode,
+  LayoutOverflow,
+  LayoutRect,
+} from "../utils/layoutAudit.js";
 import type { ProjectDir } from "../utils/project.js";
 
 const PROJECT: ProjectDir = {
@@ -241,6 +249,7 @@ function dependencies(
     motion?: MotionSpecResolution;
     runtime?: CheckFinding[];
     writeSnapshot?: CheckDependencies["writeSnapshot"];
+    captureFindingCrops?: CheckDependencies["captureFindingCrops"];
   } = {},
 ): { deps: CheckDependencies; runBrowserCheck: ReturnType<typeof vi.fn> } {
   const runBrowserCheck = vi.fn(
@@ -264,6 +273,7 @@ function dependencies(
           `snapshots/frame-${String(index).padStart(2, "0")}-at-${time.toFixed(1)}s.png`,
         ),
       ),
+    captureFindingCrops: options.captureFindingCrops ?? vi.fn(async () => []),
   };
   return { deps, runBrowserCheck };
 }
@@ -655,6 +665,115 @@ it("keeps contrast and snapshot sampling on the pre-gate layout grid", async () 
   expect(collectContrast).toHaveBeenCalledWith(5);
 });
 
+function layoutFindingOf(
+  code: LayoutIssueCode,
+  severity: "error" | "warning" | "info",
+  bbox: { x: number; y: number; width: number; height: number },
+  time = 1,
+): AnchoredLayoutIssue {
+  return {
+    code,
+    severity,
+    message: code,
+    ...anchor("#el", time),
+    bbox,
+    rect: {
+      left: bbox.x,
+      top: bbox.y,
+      right: bbox.x + bbox.width,
+      bottom: bbox.y + bbox.height,
+      ...bbox,
+    },
+  };
+}
+
+function checkFindingOf(
+  code: string,
+  severity: "error" | "warning" | "info",
+  bbox: { x: number; y: number; width: number; height: number },
+  time = 1,
+): CheckFinding {
+  return { code, severity, message: code, ...anchor("#el", time), bbox };
+}
+
+function emptySection<T extends CheckFinding>(findings: T[] = []) {
+  return { ok: true, errorCount: 0, warningCount: 0, infoCount: 0, findings };
+}
+
+function reportWithFindings(overrides: Partial<CheckReport> = {}): CheckReport {
+  return {
+    ok: true,
+    strict: false,
+    lint: { ...emptySection(), filesScanned: 0 },
+    runtime: emptySection(),
+    layout: {
+      ...emptySection(),
+      duration: 10,
+      samples: [],
+      transitionSamples: [],
+      transitionSamplesDropped: 0,
+      tolerance: 2,
+      totalIssueCount: 0,
+      truncated: false,
+    },
+    motion: { ...emptySection(), enabled: false, samples: 0 },
+    contrast: { ...emptySection(), enabled: true, samples: [], checked: 0, passed: 0 },
+    snapshots: { enabled: false, files: [], times: [], findingFiles: [] },
+    ...overrides,
+  };
+}
+
+describe("selectFindingCropRequests", () => {
+  const NON_ZERO_BBOX = { x: 10, y: 20, width: 100, height: 50 };
+  const ZERO_BBOX = { x: 0, y: 0, width: 0, height: 0 };
+
+  it("filenames a request finding-NN-<code>.png with the finding's time and bbox", () => {
+    const report = reportWithFindings({
+      layout: {
+        ...reportWithFindings().layout,
+        findings: [layoutFindingOf("clipped_text", "error", NON_ZERO_BBOX, 2.5)],
+      },
+    });
+
+    expect(selectFindingCropRequests(report)).toEqual([
+      { filename: "finding-00-clipped_text.png", time: 2.5, bbox: NON_ZERO_BBOX },
+    ]);
+  });
+
+  it("skips warnings/info and findings without a real bbox", () => {
+    const report = reportWithFindings({
+      layout: {
+        ...reportWithFindings().layout,
+        findings: [
+          layoutFindingOf("content_overlap", "warning", NON_ZERO_BBOX),
+          layoutFindingOf("clipped_text", "error", ZERO_BBOX),
+        ],
+      },
+      runtime: { ...emptySection([checkFindingOf("console_error", "info", NON_ZERO_BBOX)]) },
+    });
+
+    expect(selectFindingCropRequests(report)).toEqual([]);
+  });
+
+  it("caps at 12 requests across sections", () => {
+    const findings = Array.from({ length: 15 }, (_, index) =>
+      checkFindingOf(`code_${index}`, "error", NON_ZERO_BBOX, index),
+    );
+    const report = reportWithFindings({
+      runtime: { ...emptySection(findings) },
+    });
+
+    const requests = selectFindingCropRequests(report);
+    expect(requests).toHaveLength(12);
+    expect(requests[0]?.filename).toBe(findingCropFilename(0, "code_0"));
+    expect(requests[11]?.filename).toBe(findingCropFilename(11, "code_11"));
+  });
+
+  it("sanitizes unusual characters out of the code when building a filename", () => {
+    expect(findingCropFilename(3, "weird code/name")).toBe("finding-03-weird_code_name.png");
+  });
+});
+
 describe("check pipeline", () => {
   const originalExitCode = process.exitCode;
 
@@ -831,6 +950,47 @@ describe("check pipeline", () => {
     const absentWriter = vi.fn(async () => "unused.png");
     await runScenario(fakeDriver(), { snapshots: false }, { writeSnapshot: absentWriter });
     expect(absentWriter).not.toHaveBeenCalled();
+  });
+
+  it("captures finding crops for error findings with bboxes only when --snapshots is set", async () => {
+    const capture = vi.fn(
+      async (
+        _project: ProjectDir,
+        _options: CheckOptions,
+        _requests: CheckFindingCropRequest[],
+      ) => ["snapshots/finding-00-clipped_text.png"],
+    );
+    const { report } = await runScenario(
+      fakeDriver({ collectLayout: vi.fn(async () => [layoutIssue()]) }),
+      { snapshots: true },
+      { captureFindingCrops: capture },
+    );
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0]?.[2]).toEqual([
+      {
+        filename: "finding-00-clipped_text.png",
+        time: 0.5,
+        bbox: { x: 10, y: 20, width: 300, height: 80 },
+      },
+    ]);
+    expect(report.snapshots.findingFiles).toEqual(["snapshots/finding-00-clipped_text.png"]);
+
+    const withoutSnapshots = vi.fn(async () => ["unused.png"]);
+    await runScenario(
+      fakeDriver({ collectLayout: vi.fn(async () => [layoutIssue()]) }),
+      { snapshots: false },
+      { captureFindingCrops: withoutSnapshots },
+    );
+    expect(withoutSnapshots).not.toHaveBeenCalled();
+
+    const noErrors = vi.fn(async () => ["unused.png"]);
+    await runScenario(
+      fakeDriver({ collectLayout: vi.fn(async () => [layoutIssue("warning")]) }),
+      { snapshots: true },
+      { captureFindingCrops: noErrors },
+    );
+    expect(noErrors).not.toHaveBeenCalled();
   });
 
   it("--strict flips a warnings-only result from exit 0 to exit 1", async () => {

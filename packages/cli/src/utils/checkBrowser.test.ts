@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   openSettledCompositionPage,
   type OpenSettledCompositionPageOptions,
 } from "../capture/captureCompositionFrame.js";
 import { DEFAULT_CHECK_OPTIONS, runAuditGrid } from "./checkPipeline.js";
-import { runBrowserCheck } from "./checkBrowser.js";
+import { captureOverviewShot, runBrowserCheck } from "./checkBrowser.js";
 import type { ProjectDir } from "./project.js";
 
 const mocks = vi.hoisted(() => ({
@@ -92,6 +92,44 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
   ]);
   expect(result.timings).toEqual({ launchSettleMs: 60, seekLoopMs: 40, contrastMs: 0 });
   expect(mocks.serverClose).toHaveBeenCalledOnce();
+});
+
+describe("captureOverviewShot", () => {
+  it("injects the annotation overlay before the overview shot and removes it right after", async () => {
+    const calls: string[] = [];
+    const evaluate = vi.fn(async (fn: unknown, ...args: unknown[]) => {
+      calls.push("evaluate");
+      return typeof fn === "function" ? Reflect.apply(fn, undefined, args) : undefined;
+    });
+    const screenshot = vi.fn(async () => {
+      calls.push("screenshot");
+      return "annotated-base64";
+    });
+    const page = Object.assign(Object.create(null), { evaluate, screenshot });
+
+    const result = await captureOverviewShot(
+      page,
+      [{ label: "1 clipped_text", bbox: { x: 0, y: 0, width: 10, height: 10 } }],
+      "measurement-base64",
+    );
+
+    // inject overlay -> take the shot -> remove overlay, in that order —
+    // never present while any audit (which runs before this is called) collects.
+    expect(calls).toEqual(["evaluate", "screenshot", "evaluate"]);
+    expect(result).toBe("annotated-base64");
+  });
+
+  it("skips the overlay entirely and returns the plain screenshot when there's nothing to annotate", async () => {
+    const evaluate = vi.fn();
+    const screenshot = vi.fn();
+    const page = Object.assign(Object.create(null), { evaluate, screenshot });
+
+    const result = await captureOverviewShot(page, [], "measurement-base64");
+
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(screenshot).not.toHaveBeenCalled();
+    expect(result).toBe("measurement-base64");
+  });
 });
 
 function installRects(): void {

@@ -93,6 +93,22 @@ export interface GeometryCandidateRequest {
   tolerance: number;
 }
 
+/** A labeled rectangle drawn on an overview frame's annotation overlay
+ * (`check --snapshots`) so one screenshot orients an agent across every
+ * error finding at that sample time. */
+export interface CheckAnnotationBox {
+  label: string;
+  bbox: CheckBbox;
+}
+
+/** A single crop to capture for `check --snapshots`'s per-finding evidence
+ * PNGs — filename and bbox already resolved by the pipeline. */
+export interface CheckFindingCropRequest {
+  filename: string;
+  time: number;
+  bbox: CheckBbox;
+}
+
 export interface CheckGeometryCandidate extends CheckAnchor {
   kind: "text" | "media";
   tag: string;
@@ -125,7 +141,7 @@ export interface CheckAuditDriver {
     livenessScopes: string[],
   ): Promise<MotionFrame>;
   anchorMotionIssues(issues: LayoutIssue[]): Promise<AnchoredLayoutIssue[]>;
-  collectContrast(time: number): Promise<ContrastCapture>;
+  collectContrast(time: number, annotations?: CheckAnnotationBox[]): Promise<ContrastCapture>;
 }
 
 export interface CheckScreenshot {
@@ -192,7 +208,7 @@ export interface CheckReport {
     checked: number;
     passed: number;
   };
-  snapshots: { enabled: boolean; files: string[]; times: number[] };
+  snapshots: { enabled: boolean; files: string[]; times: number[]; findingFiles: string[] };
 }
 
 export interface CheckDependencies {
@@ -209,4 +225,9 @@ export interface CheckDependencies {
     time: number,
     pngBase64: string,
   ): Promise<string>;
+  captureFindingCrops(
+    project: ProjectDir,
+    options: CheckOptions,
+    requests: CheckFindingCropRequest[],
+  ): Promise<string[]>;
 }

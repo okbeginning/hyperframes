@@ -119,3 +119,17 @@ npx hyperframes snapshot --frames 10           # evenly-spaced N frames
 ```
 
 Captures still PNGs from the composition for visual diffing, thumbnails, or attaching to a PR. Faster than rendering a video when you only need a few hero frames. Output lands in the project's snapshots directory.
+
+### Zooming into a reported finding
+
+`hyperframes check --snapshots` already writes a `finding-NN-<code>.png` crop for every error finding that carries a bbox, but the same zoom is available standalone once you know what to look at:
+
+```bash
+npx hyperframes check --snapshots               # reports a finding, e.g. content_overlap on "#cta"
+npx hyperframes snapshot --zoom "#cta"           # crop the element to verify the defect, at 3x density
+npx hyperframes snapshot --zoom "100,50,400,300" --zoom-scale 2   # or an exact pixel region
+# fix the composition HTML, then re-check:
+npx hyperframes check
+```
+
+`--zoom` takes a CSS selector or an exact `x,y,w,h` pixel region and always produces a real high-density crop (a raised `deviceScaleFactor`, never CSS zoom or a viewport resize), so the composition's layout — and its render determinism — is untouched. A selector matching nothing is a loud error, not a silent full-frame fallback.
