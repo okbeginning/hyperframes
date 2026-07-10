@@ -1878,6 +1878,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: true,
+        isCancellation: false,
         deWorkerInversion: undefined,
         deParallelRouter: undefined,
       }),
@@ -1888,6 +1889,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: undefined,
         deParallelRouter: "routed",
       }),
@@ -1898,6 +1900,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: "inverted",
         deParallelRouter: undefined,
       }),
@@ -1908,6 +1911,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: undefined,
         deParallelRouter: undefined,
       }),
@@ -1918,6 +1922,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: undefined,
         deParallelRouter: "routed",
       }),
@@ -1928,6 +1933,7 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: "inverted",
         deParallelRouter: undefined,
       }),
@@ -1938,7 +1944,38 @@ describe("shouldRetryViaPinnedFallback (widen the self-verify retry to generic c
     expect(
       shouldRetryViaPinnedFallback({
         isVerifyError: false,
+        isCancellation: false,
         deWorkerInversion: "reverted",
+        deParallelRouter: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("never retries a cancellation, even on a pinned cohort — must propagate immediately, not detour through a fresh encoder spin-up", () => {
+    expect(
+      shouldRetryViaPinnedFallback({
+        isVerifyError: false,
+        isCancellation: true,
+        deWorkerInversion: "inverted",
+        deParallelRouter: undefined,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryViaPinnedFallback({
+        isVerifyError: false,
+        isCancellation: true,
+        deWorkerInversion: undefined,
+        deParallelRouter: "routed",
+      }),
+    ).toBe(false);
+  });
+
+  it("cancellation wins even if the error also looks like a self-verify failure", () => {
+    expect(
+      shouldRetryViaPinnedFallback({
+        isVerifyError: true,
+        isCancellation: true,
+        deWorkerInversion: undefined,
         deParallelRouter: undefined,
       }),
     ).toBe(false);

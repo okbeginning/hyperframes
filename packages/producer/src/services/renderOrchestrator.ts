@@ -1208,12 +1208,20 @@ export function resolveParallelRouterRetryPlan(args: {
  * the parallel-SS fallback uses the default pooled browser (one shared
  * process). Retrying at a possibly-higher worker count is still fewer total
  * Chrome processes than what just failed.
+ *
+ * Excludes cancellation (review): a user-initiated abort must propagate
+ * immediately, not detour through spawning a fresh encoder/capture session
+ * before the outer catch's `RenderCancelledError` branch ends the render —
+ * that would delay honoring "stop" with a pointless resource spin-up/
+ * tear-down cycle.
  */
 export function shouldRetryViaPinnedFallback(args: {
   isVerifyError: boolean;
+  isCancellation: boolean;
   deWorkerInversion: "inverted" | "reverted" | undefined;
   deParallelRouter: "routed" | "reverted" | undefined;
 }): boolean {
+  if (args.isCancellation) return false;
   if (args.isVerifyError) return true;
   return args.deWorkerInversion === "inverted" || args.deParallelRouter === "routed";
 }
@@ -2341,7 +2349,16 @@ export async function executeRenderJob(
           // spawns on retry. See shouldRetryViaPinnedFallback for exactly
           // which errors qualify.
           const isVerifyError = isDrawElementVerificationError(err);
-          if (!shouldRetryViaPinnedFallback({ isVerifyError, deWorkerInversion, deParallelRouter }))
+          const isCancellation =
+            err instanceof RenderCancelledError || abortSignal?.aborted === true;
+          if (
+            !shouldRetryViaPinnedFallback({
+              isVerifyError,
+              isCancellation,
+              deWorkerInversion,
+              deParallelRouter,
+            })
+          )
             throw err;
           const isMemoryExhaustion = !isVerifyError && isMemoryExhaustionError(err);
           deSelfVerifyFallback = isVerifyError;
@@ -2368,6 +2385,7 @@ export async function executeRenderJob(
           updateCaptureObservability({
             forceScreenshot: true,
             deSelfVerifyFallback,
+            deFallbackReason,
           });
           probeSession = null;
           // Must clear BEFORE resolveParallelRouterRetryPlan recomputes

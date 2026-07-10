@@ -42,6 +42,16 @@ export interface RenderCaptureObservability {
   browserGpuMode?: string;
   /** drawElement per-render self-verification tripped → whole render re-ran via screenshot. */
   deSelfVerifyFallback?: boolean;
+  /**
+   * Why the capture-stage retry (self-verify OR the pinned-worker-count
+   * fallback) fired: "blank"/"psnr" for a real self-verify trip,
+   * "oom"/"capture_error" for the widened generic-failure retry. Set
+   * whenever a fallback is attempted, independent of whether that retry
+   * itself later succeeds — so a render that fails AFTER a fallback attempt
+   * (perfSummary never built) is still distinguishable in failure-path
+   * telemetry from one that never attempted any fallback.
+   */
+  deFallbackReason?: string;
   /** Auto-parallel inversion outcome: "inverted" (fired, held) | "reverted" (fired, self-verify retry rolled back). */
   deWorkerInversion?: "inverted" | "reverted";
   /** Worker count the resolver would have used absent the inversion; undefined if it never fired. */

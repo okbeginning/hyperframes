@@ -109,4 +109,39 @@ describe("isMemoryExhaustionError", () => {
       false,
     );
   });
+
+  // The parallel-DE capture path (the exact cohort the OOM-aware retry
+  // targets) never delivers a bare message — executeParallelCapture /
+  // formatWorkerFailure (parallelCoordinator.ts) wrap it as
+  // "[Parallel] Capture failed: Worker N: <message>", optionally joined with
+  // other workers' segments and/or suffixed "; diagnostics: ...". Confirmed
+  // against the real wrapping logic (not a hand-typed guess at its shape).
+  it("recognizes Bun's OOM message through this codebase's own parallel-worker error wrapping", () => {
+    expect(
+      isMemoryExhaustionError(new Error("[Parallel] Capture failed: Worker 2: Out of memory")),
+    ).toBe(true);
+    expect(
+      isMemoryExhaustionError(
+        new Error("[Parallel] Capture failed: Worker 1: net::ERR_FAILED; Worker 2: Out of memory"),
+      ),
+    ).toBe(true);
+    expect(
+      isMemoryExhaustionError(
+        new Error(
+          "[Parallel] Capture failed: Worker 2: Out of memory; diagnostics: ERROR foo | bar",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  // The wrapped-worker-message pattern must stay as exact-match-per-segment
+  // as the bare-message one — a worker's own error text merely containing
+  // "out of memory" (e.g. surfaced WebGL/GPU noise) must not misclassify.
+  it("does not match 'out of memory' as a mere substring inside a wrapped worker segment", () => {
+    expect(
+      isMemoryExhaustionError(
+        new Error("Worker 2: WebGL context lost, out of memory reported by driver"),
+      ),
+    ).toBe(false);
+  });
 });

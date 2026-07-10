@@ -46,6 +46,7 @@ export interface RenderObservabilityTelemetryPayload {
   captureDeParallelRouter?: string;
   captureDePreRouterWorkers?: number;
   captureDeSelfVerifyFallback?: boolean;
+  captureDeFallbackReason?: string;
   observabilityExtractVideoCount?: number;
   observabilityExtractedVideoCount?: number;
   observabilityExtractTotalFrames?: number;
@@ -96,6 +97,7 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     de_parallel_router: props.captureDeParallelRouter,
     de_pre_router_workers: props.captureDePreRouterWorkers,
     de_self_verify_fallback: props.captureDeSelfVerifyFallback,
+    de_fallback_reason: props.captureDeFallbackReason,
     observability_extract_video_count: props.observabilityExtractVideoCount,
     observability_extracted_video_count: props.observabilityExtractedVideoCount,
     observability_extract_total_frames: props.observabilityExtractTotalFrames,

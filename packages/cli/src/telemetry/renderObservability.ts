@@ -45,6 +45,7 @@ export function renderObservabilityTelemetryPayload(
     captureDeParallelRouter: capture.deParallelRouter,
     captureDePreRouterWorkers: capture.dePreRouterWorkers,
     captureDeSelfVerifyFallback: capture.deSelfVerifyFallback,
+    captureDeFallbackReason: capture.deFallbackReason,
     observabilityExtractVideoCount: extraction?.videoCount,
     observabilityExtractedVideoCount: extraction?.extractedVideoCount,
     observabilityExtractTotalFrames: extraction?.totalFramesExtracted,

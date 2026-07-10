@@ -65,4 +65,20 @@ describe("renderObservabilityTelemetryPayload — DE inversion/router cohort (fa
     );
     expect(payload.captureDeSelfVerifyFallback).toBe(true);
   });
+
+  it("carries deFallbackReason so a render that fails AFTER an OOM-triggered fallback attempt is distinguishable from one that never attempted a fallback", () => {
+    const payload = renderObservabilityTelemetryPayload(
+      makeSummary({
+        deParallelRouter: "routed",
+        deSelfVerifyFallback: false,
+        deFallbackReason: "oom",
+      }),
+    );
+    expect(payload.captureDeFallbackReason).toBe("oom");
+  });
+
+  it("leaves deFallbackReason undefined when no fallback was ever attempted", () => {
+    const payload = renderObservabilityTelemetryPayload(makeSummary({}));
+    expect(payload.captureDeFallbackReason).toBeUndefined();
+  });
 });

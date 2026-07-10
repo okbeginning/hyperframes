@@ -3304,8 +3304,26 @@ const MEMORY_EXHAUSTION_ERROR_PATTERNS = [
 // it — a compound message with other text around the phrase still misses.
 const BUN_MEMORY_EXHAUSTION_EXACT_MESSAGE = /^out of memory\.?$/i;
 
+// The parallel-DE capture path — the exact cohort the OOM-aware retry in
+// renderOrchestrator.ts targets — never reaches isMemoryExhaustionError with
+// a bare message: `executeParallelCapture`/`formatWorkerFailure`
+// (parallelCoordinator.ts) always wrap a worker's error as
+// "Worker N: <message>", optionally suffixed "; diagnostics: ..." and joined
+// with other failed workers' segments via "; ", all prefixed
+// "[Parallel] Capture failed: ". The exact-match check above is defeated by
+// that wrapping entirely (verified) — this pattern recovers the Bun OOM
+// signal by requiring "out of memory" appear immediately after "Worker N: "
+// and immediately before end-of-string, ";", or ".", i.e. as the WHOLE
+// worker-segment content, not merely somewhere inside it. This preserves the
+// exact-match property (no bare "out of memory" substring inside otherwise-
+// unrelated worker text, e.g. "Worker 2: WebGL context lost, out of memory
+// reported by driver" does NOT match) while surviving this codebase's own
+// error-flattening.
+const BUN_MEMORY_EXHAUSTION_WRAPPED_WORKER_MESSAGE = /\bworker \d+: out of memory\.?(?:;|$)/i;
+
 export function isMemoryExhaustionError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   if (BUN_MEMORY_EXHAUSTION_EXACT_MESSAGE.test(message.trim())) return true;
+  if (BUN_MEMORY_EXHAUSTION_WRAPPED_WORKER_MESSAGE.test(message)) return true;
   return MEMORY_EXHAUSTION_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }

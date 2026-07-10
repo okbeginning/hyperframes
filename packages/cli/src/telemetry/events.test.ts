@@ -75,6 +75,28 @@ describe("render telemetry events", () => {
     );
   });
 
+  it("carries de_fallback_reason on render_error so a render that fails AFTER an OOM-triggered fallback attempt is distinguishable from one that never attempted a fallback", () => {
+    trackRenderError({
+      fps: 30,
+      quality: "standard",
+      docker: false,
+      errorMessage: "worker crashed again after fallback",
+      captureDeParallelRouter: "reverted",
+      captureDeSelfVerifyFallback: false,
+      captureDeFallbackReason: "oom",
+    });
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "render_error",
+      expect.objectContaining({
+        de_parallel_router: "reverted",
+        de_self_verify_fallback: false,
+        de_fallback_reason: "oom",
+      }),
+      undefined,
+    );
+  });
+
   it("prefers the explicit perfSummary-sourced de_worker_inversion over the capture-observability fallback on render_complete", () => {
     trackRenderComplete({
       durationMs: 1000,
