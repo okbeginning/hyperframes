@@ -5,6 +5,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync }
 import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
 import { presentRenderPlan } from "./render/present.js";
 import { executeRenderPlan, renderLintContinuationHint } from "./render/execute.js";
+// Test-only seams retained at the command boundary for render behavior tests.
 export { resolveBrowserGpuForCli, renderLintContinuationHint };
 
 export const examples: Example[] = [

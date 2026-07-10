@@ -33,6 +33,8 @@ export interface RenderExecutionDependencies {
   checkResolution: ResolutionPreflight;
 }
 
+// Exported only through render.ts so command tests can lock the user-facing guidance.
+// fallow-ignore-next-line unused-export
 export function renderLintContinuationHint(strictErrors: boolean): string {
   return strictErrors
     ? "  Continuing render despite lint warnings. Use --strict-all to block warnings."
@@ -156,6 +158,7 @@ async function ensureRenderBrowser(plan: RenderPlan): Promise<string> {
   }
 }
 
+// fallow-ignore-next-line complexity
 async function runRenderLint(plan: RenderPlan): Promise<void> {
   // lintProject's explicit-entry contract is an absolute source path;
   // entryFile remains project-relative for the producer.
