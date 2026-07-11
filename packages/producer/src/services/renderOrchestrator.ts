@@ -380,6 +380,12 @@ export interface RenderPerfSummary {
    * of `staticDedup` (predictive dedup never arms under beginframe); the
    * static-frame fraction is noDamageFrames / (noDamageFrames + hasDamageFrames).
    * Undefined when no session captured in beginframe mode.
+   *
+   * Like every metric aggregated from `dedupPerfs` (staticDedup, drawElement,
+   * subTimelineWait), a partial-capture RETRY replaces the counters with the
+   * final attempt's set (see the reset in executeDiskCaptureWithAdaptiveRetry)
+   * — after a missing-range retry the counts cover only the recaptured ranges,
+   * not the whole render, so noDamage + hasDamage may be < totalFrames.
    */
   beginFrameReuse?: {
     noDamageFrames: number;

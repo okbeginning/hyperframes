@@ -146,7 +146,9 @@ function aggregateDedup(perfs: CapturePerfSummary[]): RenderPerfSummary["staticD
  * render-level reuse outcome (SUM across workers — each worker ticks its own
  * frame range). Both zero ⟺ no beginframe session ran (screenshot/drawElement
  * sessions never increment these) → undefined, mirroring staticDedup's
- * "undefined when it never engaged" contract.
+ * "undefined when it never engaged" contract. Also inherits `dedupPerfs`'
+ * retry semantics: a partial-capture retry resets the sink, so the sums cover
+ * only the final attempt's recaptured ranges (may be < totalFrames).
  */
 function aggregateBeginFrameReuse(
   perfs: CapturePerfSummary[],
