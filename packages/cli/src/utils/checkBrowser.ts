@@ -88,8 +88,8 @@ export async function runBrowserCheck(
   motion: MotionSpecResolution,
   runGrid: RunAuditGrid,
 ): Promise<CheckBrowserResult> {
-  const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
-  const html = await bundleToSingleHtml(project.dir);
+  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
+  const html = await bundleWithLocalizedFonts(project.dir);
   const server = await serveStaticProjectHtml(project.dir, html, "Failed to bind check server");
   const drafts: RuntimeDraft[] = [];
   let currentTime = 0;
@@ -145,8 +145,8 @@ export async function captureFindingCrops(
   requests: CheckFindingCropRequest[],
 ): Promise<string[]> {
   if (requests.length === 0) return [];
-  const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
-  const html = await bundleToSingleHtml(project.dir);
+  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
+  const html = await bundleWithLocalizedFonts(project.dir);
   const server = await serveStaticProjectHtml(project.dir, html, "Failed to bind check server");
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
   const written: string[] = [];

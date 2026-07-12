@@ -193,11 +193,13 @@ async function captureSnapshots(
     zoomScale?: number;
   },
 ): Promise<string[]> {
-  const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+  const { bundleWithLocalizedFonts } = await import("../utils/bundleWithLocalizedFonts.js");
 
   const numFrames = opts.frames ?? 5;
 
-  const html = await bundleToSingleHtml(projectDir);
+  // Localize fonts (embed remote @font-face as data URIs, matching the render
+  // path) so snapshots render the real font instead of a fallback sans.
+  const html = await bundleWithLocalizedFonts(projectDir);
   const server = await serveStaticProjectHtml(projectDir, html);
 
   const savedPaths: string[] = [];
