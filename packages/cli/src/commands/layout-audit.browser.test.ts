@@ -831,6 +831,7 @@ describe("layout-audit.browser occlusion", () => {
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     delete (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+    delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
     delete (window as unknown as { __hyperframesLayoutAudit?: unknown }).__hyperframesLayoutAudit;
     clearGeometryCollector();
   });
@@ -903,6 +904,162 @@ describe("layout-audit.browser occlusion", () => {
       hitCount: 5,
     });
     expect(issues.some((issue) => issue.code === "text_occluded")).toBe(true);
+  });
+
+  it("does not flag visible text carrying pointer-events:none (probe restores hit-testing)", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="headline">Headline copy</div>
+        <div id="overlay"></div>
+      </div>
+    `;
+    installOcclusionGeometry({
+      styleOverrides: {
+        headline: { pointerEvents: "none" },
+        overlay: { backgroundColor: "rgb(10, 10, 10)" },
+      },
+      headlineTextRect: rect({ left: 200, top: 500, width: 600, height: 80 }),
+      topmostId: "overlay",
+    });
+    // Simulate real hit-testing: with hit-testing restored (inline auto), the topmost hit IS the text.
+    (document as unknown as { elementFromPoint: () => Element | null }).elementFromPoint = () => {
+      const headline = document.getElementById("headline");
+      return headline?.style.getPropertyValue("pointer-events") === "auto"
+        ? headline
+        : document.getElementById("overlay");
+    };
+    installAuditScript();
+    expect(runAudit().some((issue) => issue.code === "text_occluded")).toBe(false);
+  });
+
+  it("does not count a low-alpha gradient overlay (grid/scrim) as an opaque occluder", () => {
+    const issues = auditOcclusionScene({
+      overlayStyle: {
+        backgroundImage:
+          "repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0px, transparent 1px)",
+      },
+      topmostId: "overlay",
+    });
+    expect(issues.some((issue) => issue.code === "text_occluded")).toBe(false);
+  });
+
+  it("walks past a transparent layer sharing the text's 3D context to a deeper occluder", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="stage">
+          <div id="headline">Headline copy</div>
+          <div id="decor"></div>
+        </div>
+        <div id="panel"></div>
+      </div>
+    `;
+    installOcclusionGeometry({
+      styleOverrides: {
+        stage: { transformStyle: "preserve-3d" },
+        panel: { backgroundColor: "rgb(10, 10, 10)" },
+      },
+      headlineTextRect: rect({ left: 200, top: 500, width: 600, height: 80 }),
+      topmostId: "decor",
+    });
+    (document as unknown as { elementsFromPoint: () => Element[] }).elementsFromPoint = () =>
+      ["decor", "panel"].map((id) => document.getElementById(id) as Element);
+    installAuditScript();
+    expect(runAudit().some((issue) => issue.code === "text_occluded")).toBe(true);
+  });
+
+  it("composites stacked translucent gradient layers (two 0.5-alpha layers occlude)", () => {
+    const occluded = auditOcclusionScene({
+      overlayStyle: {
+        backgroundImage:
+          "linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5))",
+      },
+      topmostId: "overlay",
+    }).find((issue) => issue.code === "text_occluded");
+    expect(occluded).toBeDefined();
+  });
+
+  it("does not count a single 0.5-alpha gradient layer as an occluder", () => {
+    const issues = auditOcclusionScene({
+      overlayStyle: { backgroundImage: "linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5))" },
+      topmostId: "overlay",
+    });
+    expect(issues.some((issue) => issue.code === "text_occluded")).toBe(false);
+  });
+
+  it("probes text whose ink sits just above the 0.05 opacity floor", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="headline">
+          <span id="inner">Headline copy</span>
+        </div>
+        <div id="overlay"></div>
+      </div>
+    `;
+    installOcclusionGeometry({
+      styleOverrides: {
+        inner: { opacity: "0.06" },
+        overlay: { backgroundColor: "rgb(10, 10, 10)" },
+      },
+      headlineTextRect: rect({ left: 200, top: 500, width: 600, height: 80 }),
+      topmostId: "overlay",
+    });
+    installAuditScript();
+    expect(runAudit().some((issue) => issue.code === "text_occluded")).toBe(true);
+  });
+
+  it("still counts an opaque gradient panel as an occluder", () => {
+    const occluded = auditOcclusionScene({
+      overlayStyle: { backgroundImage: "linear-gradient(rgb(10, 10, 10), rgb(40, 40, 40))" },
+      topmostId: "overlay",
+    }).find((issue) => issue.code === "text_occluded");
+    expect(occluded).toBeDefined();
+  });
+
+  it("still flags text buried under an occluder that itself has pointer-events:none", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="headline">Headline copy</div>
+        <div id="overlay"></div>
+      </div>
+    `;
+    installOcclusionGeometry({
+      styleOverrides: {
+        overlay: { backgroundColor: "rgb(10, 10, 10)", pointerEvents: "none" },
+      },
+      headlineTextRect: rect({ left: 200, top: 500, width: 600, height: 80 }),
+      topmostId: "overlay",
+    });
+    // Simulate hit-testing: the scrim is only hittable once the audit restores its pointer-events.
+    (document as unknown as { elementFromPoint: () => Element | null }).elementFromPoint = () => {
+      const overlay = document.getElementById("overlay");
+      return overlay?.style.getPropertyValue("pointer-events") === "auto"
+        ? overlay
+        : document.getElementById("headline");
+    };
+    installAuditScript();
+    const occluded = runAudit().find((issue) => issue.code === "text_occluded");
+    expect(occluded).toMatchObject({ selector: "#headline", containerSelector: "#overlay" });
+  });
+
+  it("does not probe text whose every text node is still at opacity 0 (whitespace-indented markup)", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="headline">
+          <span id="inner">Headline copy</span>
+        </div>
+        <div id="overlay"></div>
+      </div>
+    `;
+    installOcclusionGeometry({
+      styleOverrides: {
+        inner: { opacity: "0" },
+        overlay: { backgroundColor: "rgb(10, 10, 10)" },
+      },
+      headlineTextRect: rect({ left: 200, top: 500, width: 600, height: 80 }),
+      topmostId: "overlay",
+    });
+    installAuditScript();
+    expect(runAudit().some((issue) => issue.code === "text_occluded")).toBe(false);
   });
 });
 

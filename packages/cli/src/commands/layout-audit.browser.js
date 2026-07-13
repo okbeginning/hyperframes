@@ -546,7 +546,9 @@
   }
 
   function alphaFromParts(parts, index) {
-    return parts.length > index ? parsePx(parts[index]) : 1;
+    if (parts.length <= index) return 1;
+    const raw = parts[index].trim();
+    return raw.endsWith("%") ? parsePx(raw) / 100 : parsePx(raw);
   }
 
   // Alpha of a CSS colour; 1 when no alpha component is present. Handles both
@@ -659,9 +661,71 @@
   }
 
   function hasOpaqueBackground(style) {
-    if (style.backgroundImage && style.backgroundImage !== "none") return true;
-    if (isTransparentColor(style.backgroundColor)) return false;
-    return colorAlpha(style.backgroundColor) > 0.6;
+    let imageAlpha = 0;
+    if (style.backgroundImage && style.backgroundImage !== "none") {
+      if (style.backgroundImage.includes("url(")) return true;
+      // A gradient only occludes as much as its colours — a 4%-alpha grid/scrim must not count.
+      imageAlpha = gradientLayersAlpha(style.backgroundImage);
+    }
+    const colorValue = isTransparentColor(style.backgroundColor)
+      ? 0
+      : colorAlpha(style.backgroundColor);
+    // Layers composite: a 0.5 gradient over a 0.5 background colour paints at ~0.75.
+    return 1 - (1 - imageAlpha) * (1 - colorValue) > 0.6;
+  }
+
+  // background-image layers stack: two 0.5-alpha gradients paint at 1-(1-.5)^2 = .75.
+  function gradientLayersAlpha(backgroundImage) {
+    let combined = 0;
+    for (const layer of splitTopLevelCommas(backgroundImage)) {
+      combined = 1 - (1 - combined) * (1 - gradientMaxAlpha(layer));
+    }
+    return combined;
+  }
+
+  function splitTopLevelCommas(value) {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < value.length; i += 1) {
+      const ch = value[i];
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      else if (ch === "," && depth === 0) {
+        parts.push(value.slice(start, i));
+        start = i + 1;
+      }
+    }
+    parts.push(value.slice(start));
+    return parts;
+  }
+
+  function gradientMaxAlpha(backgroundImage) {
+    // Any colour we cannot score (oklch/lab/named-colour fns/...) counts as opaque so real panels keep flagging.
+    const known = backgroundImage
+      .replace(/(?:repeating-)?(?:linear|radial|conic)-gradient\(/gi, "(")
+      .replace(/rgba?\([^)]*\)/gi, "");
+    if (/[a-z][a-z-]+\(/i.test(known)) return 1;
+    const colors = backgroundImage.match(/rgba?\([^)]*\)|#[0-9a-fA-F]{3,8}\b|\btransparent\b/g);
+    if (!colors) return 1;
+    let max = 0;
+    for (const color of colors) {
+      if (color === "transparent") continue;
+      if (color.startsWith("#")) {
+        const hex = color.slice(1);
+        max = Math.max(
+          max,
+          hex.length === 4
+            ? parseInt(hex[3] + hex[3], 16) / 255
+            : hex.length === 8
+              ? parseInt(hex.slice(6), 16) / 255
+              : 1,
+        );
+      } else {
+        max = Math.max(max, colorAlpha(color));
+      }
+    }
+    return max;
   }
 
   const RASTER_TAGS = new Set(["IMG", "VIDEO", "CANVAS"]);
@@ -722,13 +786,21 @@
   // part of a transient crossfade overlap.
   // fallow-ignore-next-line complexity
   function occluderAt(element, x, y) {
-    if (typeof document.elementFromPoint !== "function") return null;
-    const hit = document.elementFromPoint(x, y);
-    if (!isForeignElement(element, hit)) return null;
-    if (sharedPreserve3d(element, hit)) return null;
-    if (!isOpaqueOccluder(hit)) return null;
-    if (isCrossSceneTransitionOverlap(element, hit)) return null;
-    return hit;
+    // Walk the paint-ordered stack: a transparent layer on top must not mask an opaque one below it.
+    const stack =
+      typeof document.elementsFromPoint === "function"
+        ? document.elementsFromPoint(x, y)
+        : typeof document.elementFromPoint === "function"
+          ? [document.elementFromPoint(x, y)].filter(Boolean)
+          : [];
+    for (const hit of stack) {
+      if (!isForeignElement(element, hit)) return null;
+      // Pair-specific exemptions excuse this hit only; keep walking for deeper occluders.
+      if (sharedPreserve3d(element, hit)) continue;
+      if (isCrossSceneTransitionOverlap(element, hit)) continue;
+      if (isOpaqueOccluder(hit)) return hit;
+    }
+    return null;
   }
 
   const OCCLUSION_PROBE_Y_FRACTIONS = [0.25, 0.5, 0.75];
@@ -768,6 +840,32 @@
     return { occluder, coveredFraction: round(hits / OCCLUSION_GRID_POINTS) };
   }
 
+  // pointer-events:none hides elements from elementFromPoint — both probed text AND occluders.
+  function restoreHitTesting(root) {
+    const restores = [];
+    for (const node of [root, ...root.querySelectorAll("*")]) {
+      if (getComputedStyle(node).pointerEvents !== "none") continue;
+      const previous = node.style.getPropertyValue("pointer-events");
+      const priority = node.style.getPropertyPriority("pointer-events");
+      node.style.setProperty("pointer-events", "auto", "important");
+      restores.push(() => {
+        if (previous) node.style.setProperty("pointer-events", previous, priority);
+        else node.style.removeProperty("pointer-events");
+      });
+    }
+    return () => restores.forEach((restore) => restore());
+  }
+
+  // No text ink is on screen while every non-whitespace text node sits at ~0 opacity (entrance not started).
+  function hasVisibleTextInk(element) {
+    const nodes = [element, ...element.querySelectorAll("*")];
+    for (const node of nodes) {
+      if (!directTextNodes(node).some((textNode) => textNode.textContent.trim())) continue;
+      if (opacityChain(node) >= 0.05) return true;
+    }
+    return false;
+  }
+
   // Catches the blind spot the overflow checks miss: text that fits its box
   // perfectly but is covered by a later sibling/overlay. An atomic label
   // (short, no whitespace) flags at any coverage; ordinary prose only flags
@@ -775,6 +873,7 @@
   // cover on a paragraph is usually a styling artifact, not a reading defect.
   function occludedTextIssue(element, time) {
     if (hasAllowOcclusionFlag(element)) return null;
+    if (!hasVisibleTextInk(element)) return null;
     const textRect = textRectFor(element);
     if (!textRect) return null;
     const text = textContentFor(element);
@@ -919,15 +1018,20 @@
     );
     const issues = [];
 
-    for (const element of elements) {
-      if (!hasOwnTextCandidate(element)) continue;
-      const clipped = clippedTextIssue(element, time, tolerance);
-      if (clipped) issues.push(clipped);
-      issues.push(...textOverflowIssues(element, root, rootRect, time, tolerance));
-      const occluded = occludedTextIssue(element, time);
-      if (occluded) issues.push(occluded);
-      const invisible = invisibleTextIssue(element, time);
-      if (invisible) issues.push(invisible);
+    const restoreHits = restoreHitTesting(root);
+    try {
+      for (const element of elements) {
+        if (!hasOwnTextCandidate(element)) continue;
+        const clipped = clippedTextIssue(element, time, tolerance);
+        if (clipped) issues.push(clipped);
+        issues.push(...textOverflowIssues(element, root, rootRect, time, tolerance));
+        const occluded = occludedTextIssue(element, time);
+        if (occluded) issues.push(occluded);
+        const invisible = invisibleTextIssue(element, time);
+        if (invisible) issues.push(invisible);
+      }
+    } finally {
+      restoreHits();
     }
 
     issues.push(...containerOverflowIssues(root, time, tolerance));
