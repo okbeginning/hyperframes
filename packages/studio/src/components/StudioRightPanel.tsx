@@ -51,6 +51,19 @@ export interface StudioRightPanelProps {
   /** Dependencies for the Slideshow persist callback, threaded from App.tsx. */
   sdkSession: Composition | null;
   publishSdkSession: NonNullable<UseSlideshowPersistParams["publishSdkSession"]>;
+  /**
+   * Forces THIS `sdkSession` to re-open from disk. DesignPanelPromoteProvider
+   * opens its own separate SDK session scoped to the selected element's own
+   * file (needed so promoting inside a sub-composition binds a variable there,
+   * not on the host) — for a top-level selection that's the SAME file this
+   * session already has open, so a write through that other session leaves
+   * this one holding stale in-memory content. The self-write-echo registry
+   * that normally suppresses redundant reloads is keyed by file path only, not
+   * by session instance, so it wrongly treats the sibling session's write as
+   * "our own echo" and never reloads on its own — this must be called
+   * explicitly after such a write.
+   */
+  forceReloadSdkSession?: () => void;
   reloadPreview: () => void;
   domEditSaveTimestampRef: MutableRefObject<number>;
   recordEdit: (entry: {
@@ -71,6 +84,7 @@ export function StudioRightPanel({
   onToggleRecording,
   sdkSession,
   publishSdkSession,
+  forceReloadSdkSession,
   reloadPreview,
   domEditSaveTimestampRef,
   recordEdit,
@@ -336,6 +350,7 @@ export function StudioRightPanel({
       recordEdit={recordEdit}
       reloadPreview={reloadPreview}
       domEditSaveTimestampRef={domEditSaveTimestampRef}
+      forceReloadSharedSdkSession={forceReloadSdkSession}
     >
       <PropertyPanel
         projectId={projectId}
