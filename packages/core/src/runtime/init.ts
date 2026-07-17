@@ -1593,6 +1593,12 @@ export function initSandboxRuntimeModular(): void {
 
   let metadataRebindDebounceTimerId: number | null = null;
   let metadataRebindApplied = false;
+  // Flips true on the first renderSeek call — the render/producer capture
+  // protocol's signal that it has started deterministically driving frames.
+  // One-way for this page lifetime; every producer render gets a fresh runtime.
+  // See scheduleMetadataDurationHydration for why this gates the async
+  // metadata rebind off once set.
+  let renderCaptureSeekStarted = false;
   const metadataBoundMedia = new Set<HTMLMediaElement>();
   const volumeKeyframeCache = new WeakMap<HTMLMediaElement, VolumeKeyframe[]>();
 
@@ -1604,6 +1610,23 @@ export function initSandboxRuntimeModular(): void {
     metadataRebindDebounceTimerId = window.setTimeout(() => {
       if (state.tornDown) return;
       metadataRebindDebounceTimerId = null;
+      // The render/producer capture protocol drives frames deterministically
+      // via renderSeek — once it has claimed the timeline, an async
+      // loadedmetadata/durationchange rebind racing that loop is exactly the
+      // "double composite" hazard from HF#2550: this handler runs off its own
+      // debounced browser-side timer, uncoordinated with the capture loop's
+      // own seeks, so a rebind mid-capture can reflow the DOM between one
+      // BeginFrame call and the next. Render-mode duration correction has
+      // already happened deterministically during the probe stage before
+      // capture starts, so once frames are being driven there is nothing left
+      // for this self-correction to usefully do.
+      //
+      // renderSeek is also the entrypoint Studio's own preview iframe falls
+      // back to for overhanging timelines (useTimelinePlayer), so gate on
+      // both signals — renderCaptureSeekStarted alone would silently disable
+      // this self-correction for a live Studio scrub too, where duration
+      // hasn't been pre-resolved by a probe stage and still needs it.
+      if (renderCaptureSeekStarted && window.__HF_EXPORT_RENDER_SEEK_CONFIG) return;
       const resolution = resolveRootTimelineFromDocument();
       if (!resolution.timeline) return;
       const hasResolvedMediaFloor = isUsableTimelineDuration(
@@ -2254,6 +2277,7 @@ export function initSandboxRuntimeModular(): void {
       postState(true);
     },
     renderSeek: (timeSeconds, options) => {
+      renderCaptureSeekStarted = true;
       const quantized = quantizeTimeToFrame(
         Math.max(0, Number(timeSeconds) || 0),
         state.canonicalFps,
