@@ -455,6 +455,13 @@ function representativeElement() {
 
 describe("classic PropertyPanel input coverage", () => {
   it("emits only named, known-section events across body inputs and header/footer chrome", async () => {
+    vi.resetModules();
+    vi.doMock("./manualEditingAvailability", async () => {
+      const actual = await vi.importActual<typeof import("./manualEditingAvailability")>(
+        "./manualEditingAvailability",
+      );
+      return { ...actual, STUDIO_FLAT_INSPECTOR_ENABLED: false };
+    });
     const { PropertyPanel } = await import("./PropertyPanel");
     const host = render(
       <PropertyPanel
