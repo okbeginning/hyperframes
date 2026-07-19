@@ -45,7 +45,7 @@ describe("cloud/errors reportApiError", () => {
       message: "project too large",
       code: "hyperframes_project_too_large",
     });
-    expect(() => reportApiError("Upload failed", err)).toThrow("process.exit called");
+    expect(() => reportApiError("Upload failed", err)).toThrow(CliRuntimeError);
     expect(errorBox).toHaveBeenCalledWith(
       "Upload failed (HTTP 413)",
       "project too large",

@@ -2152,7 +2152,7 @@ function handleRenderError(
   const macosRemediation = macosOldChromeCrashRemediation(message);
   if (macosRemediation) {
     errorBox("Render failed — Chrome could not launch", message, macosRemediation);
-    process.exit(1);
+    failCommand();
   }
   errorBox("Render failed", message, hint);
   failCommand();

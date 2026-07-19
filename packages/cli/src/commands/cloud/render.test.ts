@@ -49,15 +49,13 @@ describe("validateResolutionFormatCombo", () => {
 
 describe("validateDryRunSource", () => {
   it("accepts a local directory and rejects already-uploaded sources", () => {
-    const exit = trapExit();
     expect(() => validateDryRunSource({ kind: "dir", dir: "." }, true)).not.toThrow();
     expect(() => validateDryRunSource({ kind: "asset_id", assetId: "asst_123" }, true)).toThrow(
-      "process.exit:1",
+      CliRuntimeError,
     );
     expect(() =>
       validateDryRunSource({ kind: "url", url: "https://example.com/project.zip" }, true),
-    ).toThrow("process.exit:1");
-    expect(exit).toHaveBeenCalledTimes(2);
+    ).toThrow(CliRuntimeError);
   });
 });
 

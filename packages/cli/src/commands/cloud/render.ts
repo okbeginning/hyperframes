@@ -370,7 +370,7 @@ export function validateDryRunSource(source: ProjectInputSource, dryRun: boolean
     "Invalid --dry-run input",
     "--dry-run inspects a local project directory and cannot be combined with --asset-id or --url.",
   );
-  process.exit(1);
+  failCommand();
 }
 
 // ---------------------------------------------------------------------------
@@ -616,7 +616,7 @@ function prepareLocalArchive(
   } catch (err) {
     const msg = normalizeErrorMessage(err);
     errorBox("Zip failed", msg, "Check the project and .hyperframesignore for missing files.");
-    process.exit(1);
+    failCommand();
   }
 }
 
