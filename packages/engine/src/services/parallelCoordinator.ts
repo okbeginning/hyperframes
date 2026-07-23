@@ -646,7 +646,7 @@ async function psnrForDiskSample(
 // per-sample skip/breach) — already decomposed into psnrForDiskSample +
 // assertDiskSampleAboveFloor; further splitting obscures the check.
 // fallow-ignore-next-line complexity
-async function verifyDiskDrawElementSamples(
+export async function verifyDiskDrawElementSamples(
   session: CaptureSession,
   task: WorkerTask,
   streaming: boolean,

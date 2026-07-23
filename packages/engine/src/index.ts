@@ -210,6 +210,7 @@ export {
   calculateOptimalWorkers,
   computeWorkerSizing,
   selectVerifySampleIndicesForTask,
+  verifyDiskDrawElementSamples,
   distributeFrames,
   distributeFramesInterleaved,
   executeParallelCapture,
