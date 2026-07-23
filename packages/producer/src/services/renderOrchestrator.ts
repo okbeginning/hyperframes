@@ -1575,6 +1575,29 @@ export function extractStandaloneEntryFromIndex(
 }
 
 /**
+ * Telemetry fields a drawElement self-verify failure contributes to the
+ * fallback record. Shared by the streaming and parallel-disk verify catches
+ * so the `verifyDetails` → `de_fallback_*` mapping lives in one place — a new
+ * field is added once, not once per capture path. `kind` is read structurally
+ * off the error (never from message text), so a reworded/translated/
+ * cross-module-serialized error can't flip "blank" into "psnr".
+ */
+function deVerifyFallbackTelemetry(err: unknown): {
+  reason: "psnr" | "blank";
+  failedDb?: number;
+  frameIndex?: number;
+  thresholdDb?: number;
+} {
+  const details = getDrawElementVerificationDetails(err);
+  return {
+    reason: details?.kind ?? "psnr",
+    failedDb: roundDb(details?.failedDb),
+    frameIndex: details?.frameIndex,
+    thresholdDb: roundDb(details?.verifyThresholdDb),
+  };
+}
+
+/**
  * Render a `RenderJob` end-to-end: compile → probe → extract videos →
  * audio → capture → encode → assemble. The function body is a thin
  * sequencer over the eight stage modules in `./render/stages/`; the
@@ -3026,20 +3049,14 @@ async function executeRenderPipeline(input: {
             throw err;
           const isMemoryExhaustion = !isVerifyError && isMemoryExhaustionError(err);
           deSelfVerifyFallback = isVerifyError;
-          // `kind` is a structural field on the error (DrawElementVerificationDetails),
-          // never derived from message text — a reworded message, a translated
-          // string, or a cross-module/serialized error must never be able to
-          // flip "blank" into "psnr" or vice versa (review finding).
-          const verifyDetails = isVerifyError ? getDrawElementVerificationDetails(err) : undefined;
-          deFallbackReason = isVerifyError
-            ? (verifyDetails?.kind ?? "psnr")
-            : isMemoryExhaustion
-              ? "oom"
-              : "capture_error";
           if (isVerifyError) {
-            deFallbackFailedDb = roundDb(verifyDetails?.failedDb);
-            deFallbackFrameIndex = verifyDetails?.frameIndex;
-            deFallbackThresholdDb = roundDb(verifyDetails?.verifyThresholdDb);
+            const t = deVerifyFallbackTelemetry(err);
+            deFallbackReason = t.reason;
+            deFallbackFailedDb = t.failedDb;
+            deFallbackFrameIndex = t.frameIndex;
+            deFallbackThresholdDb = t.thresholdDb;
+          } else {
+            deFallbackReason = isMemoryExhaustion ? "oom" : "capture_error";
           }
           log.warn(
             isVerifyError
@@ -3203,12 +3220,12 @@ async function executeRenderPipeline(input: {
           ) {
             throw err;
           }
-          const verifyDetails = getDrawElementVerificationDetails(err);
           deSelfVerifyFallback = true;
-          deFallbackReason = verifyDetails?.kind ?? "psnr";
-          deFallbackFailedDb = roundDb(verifyDetails?.failedDb);
-          deFallbackFrameIndex = verifyDetails?.frameIndex;
-          deFallbackThresholdDb = roundDb(verifyDetails?.verifyThresholdDb);
+          const t = deVerifyFallbackTelemetry(err);
+          deFallbackReason = t.reason;
+          deFallbackFailedDb = t.failedDb;
+          deFallbackFrameIndex = t.frameIndex;
+          deFallbackThresholdDb = t.thresholdDb;
           log.warn(
             "[Render] drawElement self-verification failed on the parallel disk path; " +
               "re-rendering via screenshot",
