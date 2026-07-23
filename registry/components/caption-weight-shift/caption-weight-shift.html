@@ -580,7 +580,11 @@
         var layout = hfApplyStageConfig(data, v.durationS);
         var tl = hfBuild(v.words, layout, v.durationS);
         tl.set({}, {}, v.durationS); // pin timeline length to the data-derived duration
-        tl.seek(0);
+        // GSAP quirk (confirmed 3.14.2): a fresh timeline already reports position 0,
+        // so seek(0) is treated as a no-op and skips rendering .set() calls scheduled
+        // at t=0 — the first frame would show pre-timeline CSS defaults (usually
+        // hidden). render(time, suppressEvents, force) with force=true bypasses that.
+        tl.render(0, true, true);
         hfCurrentTimeline = tl;
         window.__timelines = window.__timelines || {};
         window.__timelines[HF_COMPOSITION_ID] = tl;
