@@ -205,8 +205,13 @@
 
         function hfValidate(data) {
           if (!data || typeof data !== "object") return { ok: false, reason: "not-an-object" };
-          if (data.version != null && Math.floor(Number(data.version)) > HF_CONTRACT_VERSION) {
-            return { ok: false, reason: "unsupported-version" };
+          if (data.version != null) {
+            // Number("v2") is NaN and NaN > x is always false — an explicit
+            // finite check keeps malformed versions from slipping past the gate.
+            var hfVersion = Number(data.version);
+            if (!Number.isFinite(hfVersion) || Math.floor(hfVersion) > HF_CONTRACT_VERSION) {
+              return { ok: false, reason: "unsupported-version" };
+            }
           }
           if (!Array.isArray(data.segments) || data.segments.length === 0) {
             return { ok: false, reason: "no-segments" };
@@ -679,6 +684,10 @@
             var ready =
               document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
             ready.then(function () {
+              // A manual window.__HF_CAPTION_ATTACH__ call that lands while the
+              // sibling fetch / fonts.ready are still pending must win — never
+              // clobber it with the late-arriving boot payload.
+              if (hfCurrentTimeline) return;
               hfAttach(data);
             });
           }
